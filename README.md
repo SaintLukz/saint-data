@@ -1,22 +1,16 @@
 # Saint Data
 
-Painel dos jogos do Roblox: jogadores, tendências, estúdios e gêneros, com até 1000 jogos e histórico diário.
+Painel dos jogos do Roblox: jogadores, tendências, estúdios e gêneros, com até 3000 jogos e coleta de hora em hora.
 
 ## Como funciona
 
-- `scripts/collect.mjs` busca dados públicos do Roblox (listas da página Charts em vários países e dispositivos, detalhes, votos e ícones) e grava em `data/`.
-- `.github/workflows/coleta.yml` roda a coleta todo dia às 17:07 (Brasília) e faz commit dos dados. Dá para rodar na hora em **Actions → Coleta diária → Run workflow**.
-- O site é estático (`index.html` + `assets/`). A Cloudflare Pages publica a cada push, e o Cloudflare Access limita o acesso ao seu e-mail.
+- `scripts/collect.mjs` busca dados públicos do Roblox (listas da página Charts em vários países e dispositivos, detalhes, votos, ícones e capas) e mantém os 3000 jogos com mais jogadores.
+- `.github/workflows/coleta.yml` roda a coleta **toda hora, aos 7 minutos**, e grava o resultado no ramo `dados`, substituindo a versão anterior (o repo não incha). Dá para rodar na hora em **Actions → Coleta de hora em hora → Run workflow**.
+- O site (`index.html` + `assets/`) fica no ramo `main`, é publicado pela Cloudflare Pages e lê os dados direto do ramo `dados` pelo `raw.githubusercontent.com`. O Cloudflare Access limita o acesso ao seu e-mail.
 
-## Arquivos de dados
+## Arquivos no ramo `dados`
 
-- `data/games.json`: o top atual (até 1000 jogos).
-- `data/series.json`: jogadores por dia de cada jogo e o total (até 180 dias).
-- `data/tracked.json`: jogos acompanhados entre execuções, para a lista crescer até 1000.
-
-## Rodar localmente
-
-```bash
-node scripts/collect.mjs     # opcional: atualiza data/
-npx serve .                  # abre o site em http://localhost:3000
-```
+- `games.json`: o top atual, com variações de 1h, 24h e 7 dias e mini-gráfico de 24h.
+- `total.json`: soma dos jogadores, por hora (30 dias) e pico/média por dia (2 anos).
+- `g/<id>.json`: histórico de cada jogo, por hora (14 dias) e pico por dia (1 ano).
+- `tracked.json`: jogos acompanhados entre execuções.

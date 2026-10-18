@@ -52,9 +52,18 @@ const goIcon = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stro
 const starSvg = (on) => `<svg viewBox="0 0 20 20" width="16" height="16" ${on ? 'fill="currentColor"' : 'fill="none"'} stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="m10 2.8 2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L2.8 8.1l5-.7z"/></svg>`;
 
 /* ================= séries ================= */
-const ser = (id) => S.series.games[id] || [];
+const BASE = window.SD_DATA || "https://raw.githubusercontent.com/SaintLukz/saint-data/dados/";
+const HOUR = 3600e3;
 function lastN(arr, n) { return arr.slice(Math.max(0, arr.length - n)); }
-function peakOf(id) { const a = ser(id); let m = -1, i = -1; a.forEach((v, k) => { if (v != null && v > m) { m = v; i = k; } }); return i < 0 ? null : { v: m, date: S.series.dates[i] }; }
+const spark = (g) => g.spark || [];
+function peakOf(g) { return g.peak > 0 && g.days > 1 ? { v: g.peak, date: g.peakDate } : null; }
+const hourlyPts = (s) => (s?.h || []).map((y, i) => ({ x: s.h0 + i * HOUR, y, hourly: true }));
+const dailyPts = (d, key = "peak") => (d?.dates || []).map((x, i) => ({ x: new Date(x + "T12:00:00").getTime(), y: d[key][i], hourly: false }));
+const gameCache = new Map();
+async function loadGame(id) {
+  if (!gameCache.has(id)) gameCache.set(id, fetch(BASE + "g/" + id + ".json", { cache: "no-cache" }).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+  return gameCache.get(id);
+}
 function sparkline(vals, w = 48, h = 22) {
   const v = vals.filter((x) => x != null);
   if (v.length < 2) return `<svg width="${w}" height="${h}" aria-hidden="true"><line x1="2" x2="${w - 2}" y1="${h / 2}" y2="${h / 2}" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="2 3"/></svg>`;
@@ -67,11 +76,12 @@ function sparkline(vals, w = 48, h = 22) {
 }
 
 /* ================= gráfico grande ================= */
+const hfmt = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+const when = (p) => (p.hourly ? hfmt.format(new Date(p.x)) : dshort.format(new Date(p.x)));
 function bigChart(box, pts, fmt) {
   const real = pts.filter((p) => p.y != null);
   if (real.length < 2) {
-    const first = S.series.dates[0];
-    box.innerHTML = `<div class="chart-empty">O histórico começou em ${first ? dlong.format(dt(first)) : "breve"}.<br>O gráfico aparece a partir do segundo dia de coleta.</div>`;
+    box.innerHTML = `<div class="chart-empty">Ainda há poucos pontos neste período.<br>O gráfico se completa conforme a coleta de hora em hora acumula histórico.</div>`;
     return;
   }
   const W = 640, H = 300, pt = 28, pb = 6;
@@ -91,9 +101,9 @@ function bigChart(box, pts, fmt) {
     <circle cx="${X(imax)}" cy="${Y(pts[imax].y)}" r="3" fill="var(--fg)"/>
     <circle cx="${X(last)}" cy="${Y(pts[last].y)}" r="9" fill="var(--accent)" opacity=".15"/><circle cx="${X(last)}" cy="${Y(pts[last].y)}" r="4" fill="var(--accent)" stroke="var(--bg)" stroke-width="1.5"/>
     <line class="hl" x1="0" x2="0" y1="${pt}" y2="${H}" stroke="var(--muted)" stroke-dasharray="3 3" visibility="hidden"/><circle class="hd" r="4" fill="var(--accent)" stroke="var(--bg)" stroke-width="1.5" visibility="hidden"/></svg>
-    <div class="tip" style="left:${(X(imax) / W) * 100}%">${esc(fmt(pts[imax].y))}<span>${dshort.format(dt(pts[imax].x))}</span></div>`;
+    <div class="tip" style="left:${(X(imax) / W) * 100}%">${esc(fmt(pts[imax].y))}<span>${when(pts[imax])}</span></div>`;
   const svg = box.querySelector("svg"), tip = box.querySelector(".tip"), hl = svg.querySelector(".hl"), hd = svg.querySelector(".hd");
-  const reset = () => { hl.setAttribute("visibility", "hidden"); hd.setAttribute("visibility", "hidden"); tip.style.left = (X(imax) / W) * 100 + "%"; tip.innerHTML = `${esc(fmt(pts[imax].y))}<span>${dshort.format(dt(pts[imax].x))}</span>`; };
+  const reset = () => { hl.setAttribute("visibility", "hidden"); hd.setAttribute("visibility", "hidden"); tip.style.left = (X(imax) / W) * 100 + "%"; tip.innerHTML = `${esc(fmt(pts[imax].y))}<span>${when(pts[imax])}</span>`; };
   svg.addEventListener("pointermove", (e) => {
     const r = svg.getBoundingClientRect(), x = ((e.clientX - r.left) / r.width) * W;
     let b = last, bd = Infinity;
@@ -101,23 +111,23 @@ function bigChart(box, pts, fmt) {
     hl.setAttribute("x1", X(b)); hl.setAttribute("x2", X(b)); hl.setAttribute("visibility", "visible");
     hd.setAttribute("cx", X(b)); hd.setAttribute("cy", Y(pts[b].y)); hd.setAttribute("visibility", "visible");
     tip.style.left = (X(b) / W) * 100 + "%";
-    tip.innerHTML = `${esc(fmt(pts[b].y))}<span>${dshort.format(dt(pts[b].x))}</span>`;
+    tip.innerHTML = `${esc(fmt(pts[b].y))}<span>${when(pts[b])}</span>`;
   });
   svg.addEventListener("pointerleave", reset);
 }
-const RANGES = [["1S", 7], ["1M", 30], ["3M", 90], ["1A", 365], ["Tudo", Infinity]];
-function rangedChart(host, valuesFor, fmt, key) {
-  let range = store.get("sd-range-" + key, "Tudo"), mode = "d";
+const RANGES = [["1D", 24, "h"], ["1S", 168, "h"], ["1M", 720, "h"], ["3M", 92, "d"], ["1A", 366, "d"], ["Tudo", Infinity, "d"]];
+function rangedChart(host, src, fmt, key) {
+  let range = store.get("sd-range-" + key, "1S"), mode = "live";
   const draw = () => {
-    const n = RANGES.find((r) => r[0] === range)?.[1] ?? Infinity;
-    let pts = S.series.dates.map((x, i) => ({ x, y: valuesFor(i) }));
-    if (mode === "w") pts = pts.map((p, i) => { const w = pts.slice(Math.max(0, i - 6), i + 1).map((q) => q.y).filter((y) => y != null); return { x: p.x, y: w.length ? w.reduce((a, b) => a + b, 0) / w.length : null }; });
-    if (isFinite(n)) pts = lastN(pts, n);
+    const [, n, kind] = RANGES.find((r) => r[0] === range) ?? RANGES[1];
+    let pts;
+    if (kind === "h" && mode === "live" && src.hourly) pts = lastN(hourlyPts(src.hourly), n);
+    else { const dd = kind === "h" ? Math.ceil(n / 24) : n; pts = dailyPts(src.daily); if (isFinite(dd)) pts = lastN(pts, dd); }
     bigChart(host.querySelector(".chart"), pts, fmt);
     host.querySelectorAll("[data-range]").forEach((b) => b.classList.toggle("on", b.dataset.range === range));
     host.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
   };
-  host.querySelector(".seg-row").innerHTML = `<div class="seg">${RANGES.map(([k]) => `<button type="button" data-range="${k}">${k}</button>`).join("")}</div><div class="seg"><button type="button" data-mode="d"><span class="live-dot"></span>Diário</button><button type="button" data-mode="w">Média 7 dias</button></div>`;
+  host.querySelector(".seg-row").innerHTML = `<div class="seg">${RANGES.map(([k]) => `<button type="button" data-range="${k}">${k}</button>`).join("")}</div><div class="seg"><button type="button" data-mode="live"><span class="live-dot"></span>Ao vivo</button><button type="button" data-mode="peak">Pico diário</button></div>`;
   host.querySelectorAll("[data-range]").forEach((b) => b.addEventListener("click", () => { range = b.dataset.range; store.set("sd-range-" + key, range); draw(); }));
   host.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => { mode = b.dataset.mode; draw(); }));
   draw();
@@ -135,8 +145,8 @@ function buildStudios() {
   }
   return [...m.values()].map((e) => ({ ...e, d1: e.prevOk && e.prev > 0 ? e.playing / e.prev - 1 : null, newest: Math.min(...e.games.map((g) => days(g.created))) })).sort((a, b) => b.playing - a.playing);
 }
-function studioSeries(st) {
-  return S.series.dates.map((_, i) => { let s = 0, any = false; for (const g of st.games) { const v = ser(g.id)[i]; if (v != null) { s += v; any = true; } } return any ? s : null; });
+function studioSpark(st) {
+  return Array.from({ length: 24 }, (_, i) => { let s = 0, any = false; for (const g of st.games) { const v = spark(g)[i]; if (v != null) { s += v; any = true; } } return any ? s : null; });
 }
 function genreStats() {
   const m = new Map();
@@ -187,7 +197,7 @@ function card(title, sub, href, body, foot = "") {
   return `<section class="card"><div class="card-h"><h3>${title}${sub ? `<small>${sub}</small>` : ""}</h3>${href ? `<a class="go" href="${href}" aria-label="Ver mais">${goIcon}</a>` : ""}</div>${body}${foot ? `<div class="card-foot">${foot}</div>` : ""}</section>`;
 }
 function rowSpark(g, sub, right) {
-  return `<a class="r spark" href="${gl(g)}">${icon(g)}<span class="t"><span class="nm">${esc(g.name)}</span><span class="sb">${sub}</span></span><span>${sparkline(lastN(ser(g.id), 14))}</span><span class="v">${right}</span></a>`;
+  return `<a class="r spark" href="${gl(g)}">${icon(g)}<span class="t"><span class="nm">${esc(g.name)}</span><span class="sb">${sub}</span></span><span>${sparkline(spark(g))}</span><span class="v">${right}</span></a>`;
 }
 function rowPlain(g, sub, right, rightSub = "") {
   return `<a class="r" href="${gl(g)}">${icon(g)}<span class="t"><span class="nm">${esc(g.name)}</span><span class="sb">${sub}</span></span><span class="v">${right}${rightSub}</span></a>`;
@@ -209,8 +219,8 @@ const empty = (t) => `<p class="empty">${t}</p>`;
 
 /* ================= páginas ================= */
 function pageHome() {
-  const G = S.data.games, s = S.series, n = s.total.length;
-  const prev = n > 1 ? s.total[n - 2] : null;
+  const G = S.data.games, T = S.total;
+  const prev = (() => { const i = Math.round((S.data.hour - 24 * HOUR - T.h0) / HOUR); return i >= 0 ? T.h[i] ?? null : null; })();
   const hasD1 = G.some((g) => g.d1 != null);
   const rising = G.filter((g) => g.d1 != null && g.playing >= 2000).sort((a, b) => b.d1 - a.d1).slice(0, 4);
   const trending = G.filter((g) => g.lists?.includes("top-trending")).slice(0, 3);
@@ -219,9 +229,9 @@ function pageHome() {
   const studios = S.studios.slice(0, 4);
   const fresh = G.filter((g) => days(g.created) <= 30).slice(0, 4);
   const updated = G.slice().sort((a, b) => new Date(b.updated) - new Date(a.updated)).slice(0, 4);
-  const breakouts = G.map((g) => ({ g, p: peakOf(g.id) })).filter((x) => x.p && n > 1 && x.g.playing < x.p.v * 0.6).sort((a, b) => b.p.v - a.p.v).slice(0, 4);
+  const breakouts = G.map((g) => ({ g, p: peakOf(g) })).filter((x) => x.p && x.g.playing < x.p.v * 0.6).sort((a, b) => b.p.v - a.p.v).slice(0, 4);
   const ups = G.filter((g) => g.d1 > 0).length, downs = G.filter((g) => g.d1 < 0).length;
-  const atPeak = n > 1 ? G.filter((g) => { const p = peakOf(g.id); return p && p.v === g.playing && ser(g.id).filter((v) => v != null).length > 1; }).length : null;
+  const atPeak = G.some((g) => spark(g).filter((v) => v != null).length > 1) ? G.filter((g) => g.playing >= g.high24 && spark(g).filter((v) => v != null).length > 1).length : null;
   const sorted = G.map((g) => g.playing);
   let half = 0, acc = 0; for (const v of sorted) { acc += v; half++; if (acc >= S.data.total / 2) break; }
   const median = sorted[Math.floor(sorted.length / 2)];
@@ -233,12 +243,12 @@ function pageHome() {
     <section class="hero" id="hero">
       <div class="hero-lbl">Jogando agora nos ${nf.format(G.length)} maiores jogos</div>
       <div class="hero-num">${nf.format(S.data.total)}</div>
-      <div class="hero-delta">${prev ? `<span class="chg ${S.data.total >= prev ? "up" : "down"}"><span class="tri">${S.data.total >= prev ? "▲" : "▼"}</span>${compact(Math.abs(S.data.total - prev))} (${chg(S.data.total / prev - 1, { plain: true }).replace(/<[^>]+>/g, "")})</span><span class="muted">Dia anterior</span>` : `<span class="muted">Primeira coleta · ${ago(S.data.t)}</span>`}</div>
+      <div class="hero-delta">${prev ? `<span class="chg ${S.data.total >= prev ? "up" : "down"}"><span class="tri">${S.data.total >= prev ? "▲" : "▼"}</span>${compact(Math.abs(S.data.total - prev))} (${chg(S.data.total / prev - 1, { plain: true }).replace(/<[^>]+>/g, "")})</span><span class="muted">Últimas 24h</span>` : `<span class="muted">Primeira coleta · ${ago(S.data.t)}</span>`}</div>
       <div class="chart"></div>
       <div class="seg-row"></div>
     </section>
     <div class="grid2">
-      ${card("Subindo", "Últimas 24h", "#/jogos/subindo", hasD1 ? `<div class="rows">${rising.map((g) => rowSpark(g, `${compact(g.playing)} jogando`, chg(g.d1))).join("")}</div>` : empty("A variação de 24h aparece depois da segunda coleta diária."))}
+      ${card("Subindo", "Últimas 24h", "#/jogos/subindo", hasD1 ? `<div class="rows">${rising.map((g) => rowSpark(g, `${compact(g.playing)} jogando`, chg(g.d1))).join("")}</div>` : empty("A variação de 24h aparece quando houver 24 horas de coleta."))}
       ${card("Em alta", "Lista do Roblox", "#/jogos", `<div class="rows">${trending.map((g) => rowPlain(g, esc(genre(g.genre)), compact(g.playing), '<span class="sbv">jogando</span>')).join("") || empty("Sem dados.")}</div>`)}
       ${card("Gêneros", `Top ${nf.format(G.length)} · jogadores vs 24h atrás`, "#/generos", gen.map((x) => `<a class="hbar" href="#/genero/${encodeURIComponent(x.genre)}"><span class="l">${esc(genre(x.genre))}</span><span class="trk"><i style="width:${(x.share / gen[0].share) * 100}%"></i></span><span class="p">${Math.round(x.share * 100)}%</span>${chg(x.d1)}</a>`).join(""))}
       ${card("Marcos", "Perto do próximo", "#/jogos", ms.map(({ g, next, frac }) => `<a class="ms" href="${gl(g)}">${icon(g)}<span class="t" style="min-width:0"><span class="nm" style="font-size:13px;font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(g.name)}</span><span class="trk"><i style="width:${frac * 100}%"></i></span></span><span class="v">${compact(next)}<small>faltam ${compact(next - g.playing)}</small></span></a>`).join("") || empty("Nenhum jogo perto de um marco."))}
@@ -248,7 +258,7 @@ function pageHome() {
     <div class="rail-h">Para você</div>
     <a class="promo" href="#/meus-jogos"><div><b>Monte sua watchlist</b><p>Toque na <strong>estrela</strong> de qualquer jogo para acompanhar seus favoritos em <strong>Meus jogos</strong>.</p></div><div class="stack">${G.slice(0, 3).map((g, i) => (g.thumb || g.icon ? `<img src="${esc(g.icon)}" alt="" referrerpolicy="no-referrer" style="left:${i * 22}px;top:${[14, 4, 18][i]}px;transform:rotate(${[-8, 0, 8][i]}deg);z-index:${i === 1 ? 2 : 1}">` : "")).join("")}</div></a>
     <section class="card" id="mp"></section>
-    <section class="card"><div class="card-h"><h3>${months.label}</h3><small class="muted" style="text-decoration:underline dotted">Média diária</small></div>
+    <section class="card"><div class="card-h"><h3>${months.label}</h3><small class="muted" style="text-decoration:underline dotted">Média do pico diário</small></div>
       <div class="big-stat">${compact(months.cur)}${months.prev ? chg(months.cur / months.prev - 1) + '<small class="muted" style="font-size:12px;font-weight:500">vs mês anterior</small>' : ""}</div>
       <div class="qbars">${months.items.map((m, i) => `<div><i class="${i === months.items.length - 1 ? "now" : ""}" style="height:${Math.max(6, (m.v / months.max) * 100)}%"></i><span>${m.k}</span></div>`).join("")}</div></section>
   </aside>
@@ -266,7 +276,7 @@ function pageHome() {
       ${card("Todos os jogos", `Top ${nf.format(G.length)} · vs 24h atrás`, "#/jogos", `
         <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600"><span class="up">${hasD1 ? nf.format(ups) + " subindo" : "—"}</span><span class="down">${hasD1 ? nf.format(downs) + " caindo" : ""}</span></div>
         <div class="ud-bar">${hasD1 ? `<i style="flex:${ups};background:var(--up)"></i><i style="flex:${downs};background:var(--down)"></i>` : '<i style="flex:1;background:var(--card-2)"></i>'}</div>
-        <div class="kv"><span>No recorde do histórico</span><b>${atPeak == null ? "—" : nf.format(atPeak)}</b></div>
+        <div class="kv"><span>Na máxima de 24h</span><b>${atPeak == null ? "—" : nf.format(atPeak)}</b></div>
         <div class="kv"><span>Atualizados no último dia</span><b>${nf.format(G.filter((g) => days(g.updated) <= 1).length)}</b></div>
         <div class="kv"><span>Com menos de 30 dias</span><b>${nf.format(G.filter((g) => days(g.created) <= 30).length)}</b></div>`)}
       ${card("Mapa de calor", hasD1 ? "Últimas 24h" : "Por jogadores", "#/jogos", '<div class="tm" id="tm"></div>')}
@@ -284,7 +294,7 @@ function pageHome() {
         <div class="kv"><span>Jogo mediano do top</span><b>${nf.format(median)} jogando</b></div>`)}
     </div>
   </div>`;
-  rangedChart(document.getElementById("hero"), (i) => s.total[i], (v) => compact(v), "home");
+  rangedChart(document.getElementById("hero"), { hourly: T, daily: T.d }, (v) => compact(v), "home");
   mostPlayed();
   const tm = document.getElementById("tm");
   const W = tm.clientWidth || 260, H = tm.clientHeight || 172;
@@ -297,7 +307,8 @@ function pageHome() {
 }
 function monthly() {
   const m = new Map();
-  S.series.dates.forEach((d, i) => { const k = d.slice(0, 7), v = S.series.total[i]; if (v == null) return; const e = m.get(k) ?? { s: 0, n: 0 }; e.s += v; e.n++; m.set(k, e); });
+  const TD = S.total.d || { dates: [], peak: [] };
+  TD.dates.forEach((d, i) => { const k = d.slice(0, 7), v = TD.peak[i]; if (v == null) return; const e = m.get(k) ?? { s: 0, n: 0 }; e.s += v; e.n++; m.set(k, e); });
   const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   const items = [...m.entries()].map(([k, e]) => ({ k: MES[Number(k.slice(5)) - 1], v: e.s / e.n, ym: k })).slice(-7);
   const cur = items[items.length - 1]?.v ?? S.data.total, prev = items.length > 1 ? items[items.length - 2].v : null;
@@ -312,7 +323,7 @@ function mostPlayed() {
   if (tab === "wl") { const w = S.data.games.filter((g) => S.watch.has(g.id)).slice(0, 7); body = w.length ? w.map(rowStar).join("") : empty("Sua watchlist está vazia. Toque na estrela de um jogo para adicionar."); }
   else if (tab === "st") body = S.studios.slice(0, 7).map((st) => `<a class="r" href="${sl(st.name)}" style="grid-template-columns:34px minmax(0,1fr) auto">${icon(st.games[0], "ic")}<span class="t"><span class="nm">${esc(st.name)}</span><span class="sb">${st.games.length} ${st.games.length === 1 ? "jogo" : "jogos"}</span></span><span class="v">${compact(st.playing)}${chg(st.d1)}</span></a>`).join("");
   else body = S.data.games.slice(0, 7).map(rowStar).join("");
-  box.innerHTML = `<div class="card-h"><div class="tabs-text"><button type="button" data-t="mp" class="${tab === "mp" ? "on" : ""}">Mais jogados</button><button type="button" data-t="wl" class="${tab === "wl" ? "on" : ""}">Watchlist</button><button type="button" data-t="st" class="${tab === "st" ? "on" : ""}">Estúdios</button></div><a class="go" href="${tab === "st" ? "#/estudios" : tab === "wl" ? "#/meus-jogos" : "#/jogos"}" aria-label="Ver tudo">${goIcon}</a></div><div class="rows">${body}</div><div class="card-foot">${S.data.games[0].d7 != null ? "vs esta hora na semana passada" : "variação aparece com o histórico"} · top ${nf.format(S.data.games.length)} jogos por jogadores agora</div>`;
+  box.innerHTML = `<div class="card-h"><div class="tabs-text"><button type="button" data-t="mp" class="${tab === "mp" ? "on" : ""}">Mais jogados</button><button type="button" data-t="wl" class="${tab === "wl" ? "on" : ""}">Watchlist</button><button type="button" data-t="st" class="${tab === "st" ? "on" : ""}">Estúdios</button></div><a class="go" href="${tab === "st" ? "#/estudios" : tab === "wl" ? "#/meus-jogos" : "#/jogos"}" aria-label="Ver tudo">${goIcon}</a></div><div class="rows">${body}</div><div class="card-foot">${S.data.games[0].d7 != null ? "vs esta hora na semana passada" : "vs 24h atrás"} · top ${nf.format(S.data.games.length)} jogos por jogadores agora</div>`;
   box.querySelectorAll("[data-t]").forEach((b) => b.addEventListener("click", () => { store.set("sd-mp", b.dataset.t); mostPlayed(); }));
   wireStars(box, mostPlayed);
 }
@@ -344,9 +355,9 @@ function gamesTable(list, { limit, extraCol } = {}) {
   const rows = list.slice(0, limit).map((g) => {
     const rk = S.rank.get(g.id);
     return `<tr data-href="${gl(g)}"><td class="rk ${rk <= 3 ? "g" + rk : ""}">${rk}</td><td class="l"><a class="gname" href="${gl(g)}">${icon(g)}<span><b>${esc(g.name)}</b><small>${esc(g.creator)} · ${esc(genre(g.genre))}</small></span></a></td>
-      ${extraCol ? `<td>${extraCol.f(g)}</td>` : ""}<td class="pl">${nf.format(g.playing)}</td><td>${chg(g.d1)}</td><td>${chg(g.d7)}</td><td style="width:96px">${sparkline(lastN(ser(g.id), 30), 80, 24)}</td></tr>`;
+      ${extraCol ? `<td>${extraCol.f(g)}</td>` : ""}<td class="pl">${nf.format(g.playing)}</td><td>${chg(g.d1h)}</td><td>${chg(g.d1)}</td><td>${chg(g.d7)}</td><td style="width:96px">${sparkline(spark(g), 80, 24)}</td></tr>`;
   }).join("");
-  return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>#</th><th class="l">Jogo</th>${extraCol ? `<th>${extraCol.t}</th>` : ""}<th>↓ Jogadores</th><th>24H</th><th>7D</th><th>Tendência</th></tr></thead><tbody>${rows || `<tr><td colspan="7" class="l muted" style="padding:20px">Nada por aqui ainda.</td></tr>`}</tbody></table></div>`;
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>#</th><th class="l">Jogo</th>${extraCol ? `<th>${extraCol.t}</th>` : ""}<th>↓ Jogadores</th><th>1H</th><th>24H</th><th>7D</th><th>Tendência</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="l muted" style="padding:20px">Nada por aqui ainda.</td></tr>`}</tbody></table></div>`;
 }
 function wireRows(root) { root.querySelectorAll("tr[data-href]").forEach((tr) => tr.addEventListener("click", (e) => { if (!e.target.closest("a")) location.hash = tr.dataset.href; })); }
 function pageGames(tab = "mais-jogados", { genreFilter = null, title } = {}) {
@@ -355,7 +366,7 @@ function pageGames(tab = "mais-jogados", { genreFilter = null, title } = {}) {
   const render = () => {
     let list = gameList(tab, genreFilter);
     if (q) list = list.filter((g) => g.name.toLowerCase().includes(q) || (g.creator || "").toLowerCase().includes(q));
-    const note = (tab === "subindo" || tab === "caindo") && !S.data.games.some((g) => g.d1 != null) ? '<p class="empty">Subindo e Caindo aparecem depois da segunda coleta diária.</p>' : "";
+    const note = (tab === "subindo" || tab === "caindo") && !S.data.games.some((g) => g.d1 != null) ? '<p class="empty">Subindo e Caindo aparecem quando houver 24 horas de coleta.</p>' : "";
     document.getElementById("tbl").innerHTML = note + gamesTable(list, { limit, extraCol: extra }) + (list.length > limit ? `<button class="more-btn" id="more" type="button">Mostrar mais (${nf.format(list.length - limit)})</button>` : "");
     wireRows(document.getElementById("tbl"));
     document.getElementById("more")?.addEventListener("click", () => { limit += 200; render(); });
@@ -392,9 +403,9 @@ function pageStudios(tab = "mais-jogados") {
   if (tab === "novos") list = list.filter((s) => s.newest <= 60);
   $view.innerHTML = `<div class="wrap fade"><div class="page-title"><i class="app-ic" style="--c1:#ffb35c;--c2:#f57b16"><svg viewBox="0 0 20 20"><rect x="6" y="3.5" width="8" height="13" rx="1.5" fill="#fff"/><path d="M8.3 6.5h1.2M10.5 6.5h1.2M8.3 9h1.2M10.5 9h1.2M8.3 11.5h1.2M10.5 11.5h1.2" stroke="#f57b16" stroke-width="1.2"/></svg></i>Estúdios</div>
     <div class="toolbar"><div class="seg">${[["mais-jogados", "Mais jogados"], ["subindo", "Subindo"], ["caindo", "Caindo"], ["novos", "Novos"]].map(([k, t]) => `<button type="button" data-tab="${k}" class="${k === tab ? "on" : ""}">${t}</button>`).join("")}</div></div>
-    ${(tab === "subindo" || tab === "caindo") && !list.length ? '<p class="empty">Aparece depois da segunda coleta diária.</p>' : ""}
+    ${(tab === "subindo" || tab === "caindo") && !list.length ? '<p class="empty">Aparece quando houver 24 horas de coleta.</p>' : ""}
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>#</th><th class="l">Estúdio</th><th>Jogos</th><th>↓ Jogando</th><th>24H</th><th>Tendência</th></tr></thead><tbody>
-    ${list.slice(0, 300).map((s, i) => `<tr data-href="${sl(s.name)}"><td class="rk ${i < 3 ? "g" + (i + 1) : ""}">${i + 1}</td><td class="l"><a class="gname" href="${sl(s.name)}">${icon(s.games[0])}<span><b>${esc(s.name)}${s.verified ? ' <span style="color:var(--accent)">✓</span>' : ""}</b><small>${esc(s.games[0].name)}${s.games.length > 1 ? ` + ${s.games.length - 1} mais` : ""}</small></span></a></td><td>${s.games.length}</td><td class="pl">${compact(s.playing)}</td><td>${chg(s.d1)}</td><td style="width:96px">${sparkline(lastN(studioSeries(s), 30), 80, 24)}</td></tr>`).join("")}
+    ${list.slice(0, 300).map((s, i) => `<tr data-href="${sl(s.name)}"><td class="rk ${i < 3 ? "g" + (i + 1) : ""}">${i + 1}</td><td class="l"><a class="gname" href="${sl(s.name)}">${icon(s.games[0])}<span><b>${esc(s.name)}${s.verified ? ' <span style="color:var(--accent)">✓</span>' : ""}</b><small>${esc(s.games[0].name)}${s.games.length > 1 ? ` + ${s.games.length - 1} mais` : ""}</small></span></a></td><td>${s.games.length}</td><td class="pl">${compact(s.playing)}</td><td>${chg(s.d1)}</td><td style="width:96px">${sparkline(studioSpark(s), 80, 24)}</td></tr>`).join("")}
     </tbody></table></div></div>`;
   $view.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { location.hash = b.dataset.tab === "mais-jogados" ? "#/estudios" : "#/estudios/" + b.dataset.tab; }));
   wireRows($view);
@@ -407,8 +418,10 @@ function pageStudio(name) {
     <div class="g-head">${icon(s.games[0], "ic xl")}<div><h1>${esc(s.name)}</h1><div class="by"><span class="chip">#${rank} estúdio</span><span class="muted">${s.type === "Group" ? "Grupo" : "Usuário"}${s.verified ? " · verificado" : ""}</span></div></div></div>
     <section class="hero" id="sh"><div class="hero-lbl">Jogando agora em ${s.games.length} ${s.games.length === 1 ? "jogo" : "jogos"} do top</div><div class="hero-num">${nf.format(s.playing)}</div><div class="hero-delta">${chg(s.d1)}<span class="muted">vs 24h atrás · ${compact(s.visits)} visitas somadas</span></div><div class="chart"></div><div class="seg-row"></div></section>
     <div style="margin-top:22px">${gamesTable(s.games)}</div></div>`;
-  const ss = studioSeries(s);
-  rangedChart(document.getElementById("sh"), (i) => ss[i], (v) => compact(v), "studio");
+  const sp = studioSpark(s);
+  const host = document.getElementById("sh");
+  host.querySelector(".seg-row").innerHTML = '<div class="seg"><button type="button" class="on">24 horas</button></div>';
+  bigChart(host.querySelector(".chart"), sp.map((y, i) => ({ x: S.data.hour - (23 - i) * HOUR, y, hourly: true })), (v) => compact(v));
   wireRows($view);
 }
 
@@ -416,9 +429,8 @@ function pageStudio(name) {
 function pageGame(id) {
   const g = S.byId.get(Number(id));
   if (!g) return notFound("Jogo não encontrado", "#/jogos", "Jogos", `Este jogo saiu do top ${nf.format(S.data.games.length)} ou o link está errado.`);
-  const rank = S.rank.get(g.id), lk = likes(g), arr = ser(g.id), p = peakOf(g.id);
-  const firstVal = arr.find((v) => v != null);
-  const since = firstVal && arr.filter((v) => v != null).length > 1 ? g.playing - firstVal : null;
+  const rank = S.rank.get(g.id), lk = likes(g), p = peakOf(g);
+  const since = null, firstVal = null;
   const studio = S.studios.find((x) => x.name === g.creator);
   const listNames = { "top-trending": "Em alta", "up-and-coming": "Promissores", "top-playing-now": "Mais jogados", "fun-with-friends": "Com amigos", "top-revisited": "Mais revisitados" };
   const on = S.watch.has(g.id);
@@ -427,9 +439,9 @@ function pageGame(id) {
       <div class="acts"><button class="pill-btn icon${on ? " on" : ""}" type="button" id="gstar" aria-label="Watchlist">${starSvg(on)}</button><a class="pill-btn" href="https://www.roblox.com/games/${g.place}" target="_blank" rel="noopener">Abrir no Roblox ↗</a></div></div>
     <div class="g-grid"><div style="min-width:0">
       <section class="hero" id="gh"><div class="hero-num" style="margin-top:0">${nf.format(g.playing)}</div>
-        <div class="hero-delta">${since != null ? `<span class="chg ${since >= 0 ? "up" : "down"}"><span class="tri">${since >= 0 ? "▲" : "▼"}</span>${compact(Math.abs(since))} (${(Math.abs(since / firstVal) * 100).toFixed(1).replace(".", ",")}%)</span><span class="muted">Desde o início do acompanhamento</span>` : `<span class="muted">Jogando agora · coletado ${ago(S.data.t)}</span>`}</div>
+        <div class="hero-delta">${since != null ? `<span class="chg ${since >= 0 ? "up" : "down"}"><span class="tri">${since >= 0 ? "▲" : "▼"}</span>${compact(Math.abs(since))} (${(Math.abs(since / firstVal) * 100).toFixed(1).replace(".", ",")}%)</span><span class="muted">Desde o início do acompanhamento</span>` : `${chg(g.d1)}<span class="muted">Últimas 24h · coletado ${ago(S.data.t)}</span>`}</div>
         <div class="chart"></div><div class="seg-row"></div></section>
-      <div class="strip"><div><small>Rank</small><b>#${rank}</b></div><div><small>Aprovação</small><b>${lk == null ? "—" : Math.round(lk * 100) + "%"}</b></div><div class="hot"><small>Visitas</small><b>${compact(g.visits)}</b></div><div class="hot"><small>Favoritos</small><b>${compact(g.fav)}</b></div><div><small>Pico</small><b>${compact(p?.v ?? g.playing)}</b></div></div>
+      <div class="strip"><div><small>Rank</small><b>#${rank}</b></div><div><small>Aprovação</small><b>${lk == null ? "—" : Math.round(lk * 100) + "%"}</b></div><div class="hot"><small>Visitas</small><b>${compact(g.visits)}</b></div><div class="hot"><small>Favoritos</small><b>${compact(g.fav)}</b></div><div><small>Máx. 24h</small><b>${compact(g.high24)}</b></div></div>
       <div class="g-tabs"><button type="button" data-gt="ov" class="on">Visão geral</button><button type="button" data-gt="ab">Sobre</button></div>
       <div id="gt"></div>
     </div>
@@ -439,12 +451,17 @@ function pageGame(id) {
       <div class="facts"><div>Atualizado<b>${ago(g.updated)}</b></div><div>Criado<b>${ago(g.created)}</b></div><div>Servidor<b>${g.maxPlayers ?? "—"}</b></div><div>Gênero<b>${esc(genre(g.genre))}</b></div></div>
       ${(g.lists || []).length ? `<div class="by" style="display:flex;flex-wrap:wrap;gap:6px">${g.lists.map((l) => listNames[l]).filter(Boolean).map((t) => `<span class="chip">${t}</span>`).join("")}</div>` : ""}
     </aside></div></div>`;
-  rangedChart(document.getElementById("gh"), (i) => arr[i] ?? null, (v) => compact(v), "game");
+  const gh = document.getElementById("gh");
+  gh.querySelector(".chart").innerHTML = '<div class="chart-empty">Carregando histórico…</div>';
+  let hist = null;
+  loadGame(g.id).then((h) => { if (location.hash !== "#/jogo/" + g.id) return; hist = h; rangedChart(gh, { hourly: h, daily: h?.d }, (v) => compact(v), "game"); show(curTab); });
   document.getElementById("gstar").addEventListener("click", (e) => { S.watch.has(g.id) ? S.watch.delete(g.id) : S.watch.add(g.id); store.set("sd-watch", [...S.watch]); e.currentTarget.classList.toggle("on", S.watch.has(g.id)); e.currentTarget.innerHTML = starSvg(S.watch.has(g.id)); });
   const tabs = {
     ov: () => {
-      const idx = new Map(S.series.dates.map((d, i) => [d, i]));
-      const end = new Date(S.series.dates[S.series.dates.length - 1] + "T12:00:00");
+      const D = hist?.d || { dates: [new Date(Date.now() - 3 * HOUR).toISOString().slice(0, 10)], peak: [g.playing] };
+      const arr = D.peak;
+      const idx = new Map(D.dates.map((d, i) => [d, i]));
+      const end = new Date(D.dates[D.dates.length - 1] + "T12:00:00");
       const d14 = Array.from({ length: 14 }, (_, k) => { const x = new Date(end.getTime() - (13 - k) * 864e5).toISOString().slice(0, 10); const i = idx.get(x); return { d: x, v: i == null ? null : arr[i] ?? null }; });
       const vals = d14.map((x) => x.v).filter((v) => v != null);
       const mx = Math.max(...vals, 1);
@@ -454,15 +471,16 @@ function pageGame(id) {
       const avg7 = wk.length ? wk.reduce((a, b) => a + b, 0) / wk.length : null;
       const status = g.d1 == null ? ["Novo no histórico", ""] : g.d1 > 0.25 ? ["Disparando", "green"] : g.d1 > 0.02 ? ["Subindo", "green"] : g.d1 < -0.02 ? ["Caindo", ""] : ["Estável", ""];
       return `<div class="g-sec"><h2>Momento <span class="chip ${status[1]}">${status[0]}</span></h2>
-        <p class="lead">${compact(g.playing)} <span>jogando agora</span>${y ? `, <b class="${g.playing >= y ? "up" : "down"}">${(g.playing / y).toFixed(1).replace(".", ",")}×</b> <span>o dia anterior.</span>` : "<span>.</span>"}</p>
-        <div class="muted" style="font-size:12.5px">Jogadores por dia · últimos 14 dias</div>
+        <p class="lead">${compact(g.playing)} <span>jogando agora</span>${y ? `, <b class="${g.playing >= y ? "up" : "down"}">${(g.playing / y).toFixed(1).replace(".", ",")}×</b> <span>o pico de ontem.</span>` : "<span>.</span>"}</p>
+        <div class="muted" style="font-size:12.5px">Pico de jogadores por dia · últimos 14 dias</div>
         <div class="dbars">${d14.map((x, i) => `<div><i class="${i === d14.length - 1 ? "now" : ""}" style="height:${x.v == null ? 2 : Math.max(3, (x.v / mx) * 100)}%"></i><span>${i === d14.length - 1 ? "Hoje" : W[dt(x.d).getDay()]}</span></div>`).join("")}</div>
-        <div class="trio"><div><small>Média de 7 dias</small><b>${compact(avg7)}</b></div><div><small>Dia anterior</small><b>${compact(y)}</b>${g.d7 != null ? `<span>${chg(g.d7)} vs semana passada</span>` : ""}</div><div><small>Do pico</small><b>${p && p.v > 0 ? (g.playing === p.v ? "No pico" : "−" + ((1 - g.playing / p.v) * 100).toFixed(1).replace(".", ",") + "%") : "—"}</b>${p ? `<span>${compact(p.v)} em ${dshort.format(dt(p.date))}</span>` : ""}</div></div></div>`;
+        <div class="trio"><div><small>Média de 7 dias</small><b>${compact(avg7)}</b></div><div><small>Pico de ontem</small><b>${compact(y)}</b>${g.d7 != null ? `<span>${chg(g.d7)} vs semana passada</span>` : ""}</div><div><small>Do pico</small><b>${p && p.v > 0 ? (g.playing === p.v ? "No pico" : "−" + ((1 - g.playing / p.v) * 100).toFixed(1).replace(".", ",") + "%") : "—"}</b>${p ? `<span>${compact(p.v)} em ${dshort.format(dt(p.date))}</span>` : ""}</div></div></div>`;
     },
     ab: () => `<div class="g-sec"><h2>Descrição</h2><p class="desc">${esc(g.desc) || "Sem descrição."}</p></div>
       <div class="g-sec"><h2>Ficha</h2><div class="facts" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div>Criado<b>${dlong.format(new Date(g.created))}</b></div><div>Atualizado<b>${dlong.format(new Date(g.updated))}</b></div><div>Gênero<b>${esc(genre(g.genre))}${g.genre2 ? " · " + esc(g.genre2) : ""}</b></div><div>Classificação<b>${esc(g.maturity || "—")}</b></div><div>Votos<b>${compact(g.up + g.down)}</b></div><div>ID do universo<b>${g.id}</b></div></div></div>`,
   };
-  const show = (k) => { document.getElementById("gt").innerHTML = tabs[k](); $view.querySelectorAll("[data-gt]").forEach((b) => b.classList.toggle("on", b.dataset.gt === k)); };
+  let curTab = "ov";
+  const show = (k) => { curTab = k; document.getElementById("gt").innerHTML = tabs[k](); $view.querySelectorAll("[data-gt]").forEach((b) => b.classList.toggle("on", b.dataset.gt === k)); };
   $view.querySelectorAll("[data-gt]").forEach((b) => b.addEventListener("click", () => show(b.dataset.gt)));
   show("ov");
 }
@@ -490,8 +508,8 @@ function pageSoon(k) {
 }
 function pageAbout() {
   $view.innerHTML = `<div class="soon fade" style="text-align:left;max-width:640px"><h1>Sobre os dados</h1>
-  <p>O Saint Data coleta dados públicos do Roblox todo dia às 17h07 (horário de Brasília): as listas da página Charts em vários países e dispositivos, e os detalhes de cada jogo. Ficam os ${nf.format(S.data.games.length)} jogos com mais jogadores no momento da coleta.</p>
-  <p style="margin-top:12px">Última coleta: <b>${dlong.format(new Date(S.data.t))}</b>, ${ago(S.data.t)}. Histórico: <b>${S.series.dates.length} ${S.series.dates.length === 1 ? "dia" : "dias"}</b>. As variações de 24h e 7 dias comparam com as coletas anteriores, por isso aparecem a partir do segundo dia.</p>
+  <p>O Saint Data coleta dados públicos do Roblox de hora em hora: as listas da página Charts em vários países e dispositivos, e os detalhes de cada jogo. Ficam os ${nf.format(S.data.games.length)} jogos com mais jogadores no momento da coleta.</p>
+  <p style="margin-top:12px">Última coleta: <b>${dlong.format(new Date(S.data.t))}</b>, ${ago(S.data.t)}. Histórico: <b>${S.total.d?.dates?.length ?? 0} ${(S.total.d?.dates?.length ?? 0) === 1 ? "dia" : "dias"}</b>. As variações de 1h, 24h e 7 dias comparam com a mesma hora no passado, por isso aparecem conforme o histórico cresce.</p>
   <p style="margin-top:12px">O total no topo do Início soma só esses ${nf.format(S.data.games.length)} jogos, não o Roblox inteiro.</p></div>`;
 }
 function notFound(t, href, back, msg = "") { $view.innerHTML = `<div class="wrap fade"><a class="back" href="${href}">← ${back}</a><h1 class="page-title">${t}</h1><p class="muted">${msg}</p></div>`; }
@@ -553,8 +571,8 @@ function route() {
 /* ================= carga ================= */
 async function load() {
   try {
-    const [data, series] = await Promise.all(["data/games.json", "data/series.json"].map((u) => fetch(u, { cache: "no-cache" }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status} em ${u}`); return r.json(); })));
-    S.data = data; S.series = series;
+    const [data, total] = await Promise.all(["games.json", "total.json"].map((u) => fetch(BASE + u, { cache: "no-cache" }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status} em ${u}`); return r.json(); })));
+    S.data = data; S.total = total;
     S.byId = new Map(data.games.map((g) => [g.id, g]));
     S.rank = new Map(data.games.map((g, i) => [g.id, i + 1]));
     S.studios = buildStudios();

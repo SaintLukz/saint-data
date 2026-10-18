@@ -1,8 +1,8 @@
-name: Coleta diária
+name: Coleta de hora em hora
 
 on:
   schedule:
-    - cron: "7 20 * * *" # todo dia às 17:07 (horário de Brasília)
+    - cron: "7 * * * *" # todo hora, aos 7 minutos
   workflow_dispatch: {}
 
 permissions:
@@ -15,22 +15,34 @@ concurrency:
 jobs:
   coletar:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+
+      - name: Baixar dados anteriores (ramo dados)
+        run: |
+          if git ls-remote --exit-code --heads origin dados >/dev/null; then
+            git clone --depth 1 --branch dados "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" prev
+          else
+            mkdir -p prev
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Coletar dados do Roblox
+        env:
+          PREV: prev
+          OUT: out
         run: node scripts/collect.mjs
-      - name: Salvar dados
+
+      - name: Publicar no ramo dados (substitui a versão anterior)
         run: |
+          cd out
+          git init -q -b dados
           git config user.name "saint-data-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data
-          if git diff --cached --quiet; then
-            echo "Nada mudou."
-          else
-            git commit -m "dados: $(date -u +%Y-%m-%d)"
-            git push
-          fi
+          git add -A
+          git commit -q -m "dados $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" dados
