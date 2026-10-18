@@ -233,7 +233,7 @@ function pageHome() {
   })();
   const hasD1 = G.some((g) => ch(g) != null);
   const [wS, wAgo, wLong] = WIN[S.win] || WIN.d1;
-  const rising = G.filter((g) => ch(g) != null && g.playing >= 2000).sort((a, b) => b.d1 - a.d1).slice(0, 4);
+  const rising = G.filter((g) => ch(g) != null && g.playing >= 2000).sort((a, b) => ch(b) - ch(a)).slice(0, 4);
   const trending = G.filter((g) => g.lists?.includes("top-trending")).slice(0, 3);
   const gen = genreStats().slice(0, 4);
   const ms = milestones().slice(0, 3);
@@ -349,8 +349,8 @@ function gameList(tab, genreFilter) {
   let G = S.data.games.slice();
   if (genreFilter != null) G = G.filter((g) => g.genre === genreFilter);
   switch (tab) {
-    case "subindo": return G.filter((g) => ch(g) != null && g.playing >= 500).sort((a, b) => b.d1 - a.d1);
-    case "caindo": return G.filter((g) => ch(g) != null && g.playing >= 500).sort((a, b) => a.d1 - b.d1);
+    case "subindo": return G.filter((g) => ch(g) != null && g.playing >= 500).sort((a, b) => ch(b) - ch(a));
+    case "caindo": return G.filter((g) => ch(g) != null && g.playing >= 500).sort((a, b) => ch(a) - ch(b));
     case "novos": return G.filter((g) => days(g.created) <= 60);
     case "atualizados": return G.sort((a, b) => new Date(b.updated) - new Date(a.updated));
     case "joias": return G.filter((g) => (likes(g) ?? 0) >= 0.9 && g.playing < 20000 && g.up + g.down > 2000).sort((a, b) => likes(b) - likes(a));
