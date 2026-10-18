@@ -126,6 +126,13 @@ async function main() {
     await sleep(150);
   }
 
+  const thumbs = new Map();
+  for (const b of chunks(keepIds, 50)) {
+    const j = await getJSON(`https://thumbnails.roblox.com/v1/games/multiget/thumbnails?universeIds=${b.join(",")}&countPerUniverse=1&defaults=true&size=768x432&format=Webp&isCircular=false`);
+    for (const t of j?.data ?? []) { const u = t.thumbnails?.[0]?.imageUrl; if (u) thumbs.set(t.universeId, u); }
+    await sleep(150);
+  }
+
   // 5. Histórico diário (um ponto por dia; se rodar de novo no mesmo dia, substitui).
   let di = series.dates.indexOf(today);
   if (di === -1) {
@@ -162,8 +169,9 @@ async function main() {
       created: g.created,
       updated: g.updated,
       maturity: meta?.maturity ?? "",
-      desc: (g.description ?? "").slice(0, 400),
+      desc: Array.from(g.description ?? "").slice(0, 400).join(""),
       icon: icons.get(g.id) ?? null,
+      thumb: thumbs.get(g.id) ?? null,
       lists: meta ? [...meta.sorts] : [],
       d1: prevIdx >= 0 ? pct(g.playing, s[prevIdx]) : null,
       d7: weekIdx >= 0 && weekIdx < di ? pct(g.playing, s[weekIdx]) : null,

@@ -3,38 +3,76 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Saint Data</title>
-<meta name="description" content="Saint Data: os jogos do Roblox em números. Jogadores, tendências, estúdios e gêneros, atualizados todo dia.">
-<meta name="theme-color" content="#0c0f1a">
+<title>Saint Data · O que está rolando no Roblox</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Sora:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="assets/style.css">
-<script>try{var t=localStorage.getItem("sd-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>try{var t=localStorage.getItem("sd-theme");if(t&&t!=="system")document.documentElement.dataset.theme=t}catch(e){}</script>
 </head>
 <body>
-<div class="shell">
-  <aside class="side">
-    <a class="brand" href="#/" aria-label="Saint Data, início">
-      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><ellipse cx="16" cy="7" rx="9" ry="3.2" fill="none" stroke="var(--accent)" stroke-width="2.2"/><rect x="6" y="20" width="4.5" height="8" rx="1.2" fill="currentColor"/><rect x="13.75" y="14" width="4.5" height="14" rx="1.2" fill="currentColor"/><rect x="21.5" y="17" width="4.5" height="11" rx="1.2" fill="currentColor"/></svg>
-      <span>Saint Data</span>
-    </a>
+<div class="app">
+  <aside class="side" id="side">
+    <div class="side-top">
+      <a class="brand" href="#/" aria-label="Saint Data, início">
+        <img src="assets/mark.svg" alt="" width="26" height="26">
+        <span>Saint Data</span>
+      </a>
+      <button class="icon-btn collapse" id="collapse" type="button" aria-label="Recolher menu" title="Recolher menu">
+        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="3.5" width="15" height="13" rx="3"/><path d="M8 3.5v13"/></svg>
+      </button>
+    </div>
+    <button class="search-btn" id="search-btn" type="button">
+      <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.8 3.8" stroke-linecap="round"/></svg>
+      <span>Buscar</span>
+    </button>
     <nav class="nav" aria-label="Seções">
-      <a href="#/" data-route="home">Início</a>
-      <a href="#/jogos" data-route="jogos">Jogos</a>
-      <a href="#/estudios" data-route="estudios">Estúdios</a>
-      <a href="#/generos" data-route="generos">Gêneros</a>
-      <a href="#/novos" data-route="novos">Novos</a>
+      <div class="nav-group">
+        <a href="#/" data-route="home"><i class="app-ic" style="--c1:#5ea8ff;--c2:#1f6ff2"><svg viewBox="0 0 20 20"><path d="M4 9.2 10 4l6 5.2V16h-4v-4H8v4H4z" fill="#fff"/></svg></i><span>Início</span></a>
+        <a href="#/jogos" data-route="jogos"><i class="app-ic" style="--c1:#e9f1ff;--c2:#cfe0ff"><svg viewBox="0 0 20 20"><path d="M3.5 14.5 8 10l3 3 5.5-6.5" fill="none" stroke="#1f6ff2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></i><span>Jogos</span></a>
+        <a href="#/estudios" data-route="estudios"><i class="app-ic" style="--c1:#ffb35c;--c2:#f57b16"><svg viewBox="0 0 20 20"><rect x="6" y="3.5" width="8" height="13" rx="1.5" fill="#fff"/><path d="M8.3 6.5h1.2M10.5 6.5h1.2M8.3 9h1.2M10.5 9h1.2M8.3 11.5h1.2M10.5 11.5h1.2" stroke="#f57b16" stroke-width="1.2"/></svg></i><span>Estúdios</span></a>
+        <a href="#/meus-jogos" data-route="meus-jogos"><i class="app-ic" style="--c1:#7aa7ff;--c2:#4161f0"><svg viewBox="0 0 20 20"><rect x="4" y="5" width="12" height="10" rx="3" fill="#fff"/><circle cx="8" cy="10" r="1.3" fill="#4161f0"/><circle cx="12" cy="10" r="1.3" fill="#4161f0"/></svg></i><span>Meus jogos</span></a>
+      </div>
+      <div class="nav-group">
+        <a href="#/clipes" data-route="clipes"><i class="app-ic" style="--c1:#ff8a7a;--c2:#ef3b2c"><svg viewBox="0 0 20 20"><rect x="6" y="4" width="8" height="12" rx="2" fill="#fff"/><path d="m9 8.3 3 1.7-3 1.7z" fill="#ef3b2c"/></svg></i><span>Clipes</span></a>
+        <a href="#/calls" data-route="calls"><i class="app-ic" style="--c1:#f4f4f6;--c2:#e2e2e8"><svg viewBox="0 0 20 20"><path d="m10 4 3.5 4.5h-7z" fill="#1f8f45"/><path d="m10 16-3.5-4.5h7z" fill="#d92d20"/></svg></i><span>Calls</span></a>
+        <a href="#/calendario" data-route="calendario"><i class="app-ic" style="--c1:#ffffff;--c2:#ececf1"><svg viewBox="0 0 20 20"><rect x="4" y="4" width="12" height="3" rx="1" fill="#ef3b2c"/><text x="10" y="15.2" font-size="7.5" font-weight="700" text-anchor="middle" fill="#222" font-family="Inter,Arial">18</text></svg></i><span>Calendário</span></a>
+        <a href="#/cards" data-route="cards"><i class="app-ic" style="--c1:#ffd76a;--c2:#ff9f1a"><svg viewBox="0 0 20 20"><rect x="4.5" y="6" width="7" height="9" rx="1.5" fill="#fff" transform="rotate(-10 8 10)"/><rect x="8.5" y="5" width="7" height="9" rx="1.5" fill="#ffe9b0" transform="rotate(10 12 9)"/></svg></i><span>Cards</span></a>
+        <a href="#/limiteds" data-route="limiteds"><i class="app-ic" style="--c1:#d9a6ff;--c2:#9b4dff"><svg viewBox="0 0 20 20"><path d="m10 4 5 4.5L10 16 5 8.5z" fill="#fff"/></svg></i><span>Limiteds</span></a>
+      </div>
+      <div class="nav-group">
+        <a href="#/mensagens" data-route="mensagens"><i class="glyph"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M17 3 3 9l5.5 2L11 17z"/><path d="m8.5 11 4-4"/></svg></i><span>Mensagens</span></a>
+        <a href="#/notificacoes" data-route="notificacoes"><i class="glyph"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 13.5V9a5 5 0 0 1 10 0v4.5l1.2 1.5H3.8z"/><path d="M8.5 17h3"/></svg></i><span>Notificações</span></a>
+      </div>
     </nav>
     <div class="side-foot">
-      <button class="theme-btn" id="theme-btn" type="button">Alternar tema</button>
-      <p class="stamp" id="stamp">Carregando dados…</p>
+      <a class="foot-link" href="#/sobre"><i class="glyph"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="3.5" width="13" height="13" rx="3"/><path d="M10 7v6M7.5 10.5 10 13l2.5-2.5" stroke-linecap="round"/></svg></i><span>Sobre os dados</span></a>
+      <div class="foot-row">
+        <a class="signin" href="#/entrar">Entrar</a>
+        <div class="theme-wrap">
+          <button class="round-btn" id="theme-btn" type="button" aria-label="Tema" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3.2"/><path d="M10 2.8v1.6M10 15.6v1.6M2.8 10h1.6M15.6 10h1.6M4.9 4.9l1.1 1.1M14 14l1.1 1.1M4.9 15.1 6 14M14 6l1.1-1.1"/></svg>
+          </button>
+          <div class="theme-pop" id="theme-pop" hidden>
+            <button type="button" data-theme-pick="light"><span class="sw sw-light"></span>Claro</button>
+            <button type="button" data-theme-pick="dark"><span class="sw sw-dark"></span>Escuro</button>
+            <button type="button" data-theme-pick="system"><span class="sw sw-sys"></span>Sistema</button>
+          </div>
+        </div>
+      </div>
     </div>
   </aside>
-  <main class="main" id="view" tabindex="-1">
-    <p class="loading">Carregando dados…</p>
-  </main>
+  <main class="main" id="view" tabindex="-1"><p class="loading">Carregando…</p></main>
+</div>
+<div class="search-layer" id="search-layer" hidden>
+  <div class="search-box" role="dialog" aria-label="Buscar">
+    <input id="search-q" type="search" placeholder="Buscar jogos e estúdios" autocomplete="off">
+    <div id="search-res" class="search-res"></div>
+  </div>
 </div>
 <script src="assets/app.js" type="module"></script>
 </body>
