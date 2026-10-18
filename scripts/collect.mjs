@@ -44,16 +44,20 @@ async function getJSON(url, tries = 5) {
 async function readJSON(path, fallback) { try { return JSON.parse(await readFile(path, "utf8")); } catch { return fallback; } }
 
 // série por hora: { h0: ms da primeira hora, h: [valores] }
-function putHour(s, hourMs, value, maxLen) {
+function putHour(s, hourMs, value, maxLen, step = HOUR) {
   s = s && s.h0 != null ? { h0: s.h0, h: s.h.slice() } : { h0: hourMs, h: [] };
-  let idx = Math.round((hourMs - s.h0) / HOUR);
+  let idx = Math.round((hourMs - s.h0) / step);
   if (idx < 0) { s.h = Array(-idx).fill(null).concat(s.h); s.h0 = hourMs; idx = 0; }
   while (s.h.length <= idx) s.h.push(null);
   s.h[idx] = value;
   const extra = s.h.length - maxLen;
-  if (extra > 0) { s.h = s.h.slice(extra); s.h0 += extra * HOUR; }
+  if (extra > 0) { s.h = s.h.slice(extra); s.h0 += extra * step; }
   return s;
 }
+// série de 15 em 15 minutos (últimas 48h): { q0, q }
+const SLOT = 15 * 60e3, SLOTS = 192;
+function putSlot(prev, slotMs, value) { const r = putHour(prev && prev.q0 != null ? { h0: prev.q0, h: prev.q } : null, slotMs, value, SLOTS, SLOT); return { q0: r.h0, q: r.h }; }
+const slotAgo = (p, slotMs, n) => { if (!p || p.q0 == null) return null; const i = Math.round((slotMs - n * SLOT - p.q0) / SLOT); return i >= 0 && i < p.q.length ? p.q[i] : null; };
 const hourAgo = (s, hourMs, n) => { if (!s) return null; const i = Math.round((hourMs - n * HOUR - s.h0) / HOUR); return i >= 0 && i < s.h.length ? s.h[i] : null; };
 const lastHours = (s, hourMs, n) => Array.from({ length: n }, (_, k) => hourAgo(s, hourMs, n - 1 - k));
 // série por dia: { dates: [...], peak: [...] , avg?: [...], cnt?: [...] }
@@ -143,6 +147,7 @@ async function migrateOld() {
 async function main() {
   const now = process.env.NOW ? new Date(process.env.NOW) : new Date(); // NOW só para testes
   const hourMs = Math.floor(now.getTime() / HOUR) * HOUR;
+  const slotMs = Math.floor(now.getTime() / SLOT) * SLOT;
   const today = new Date(now.getTime() - 3 * HOUR).toISOString().slice(0, 10); // dia no horário de Brasília
   const fresh = !existsSync(join(PREV, "games.json"));
   const mig = fresh ? await migrateOld() : null;
@@ -195,7 +200,9 @@ async function main() {
     const prev = await loadGame(g.id);
     const hs = putHour(prev, hourMs, playing, GAME_HOURS);
     const ds = putDay(prev?.d, today, playing, GAME_DAYS);
-    await writeFile(join(OUT, "g", `${g.id}.json`), JSON.stringify({ h0: hs.h0, h: hs.h, d: ds }));
+    const qs = putSlot(prev, slotMs, playing);
+    await writeFile(join(OUT, "g", `${g.id}.json`), JSON.stringify({ h0: hs.h0, h: hs.h, ...qs, d: ds }));
+    const hourly = lastHours(hs, hourMs, 24);
     let pk = -1, pd = null; ds.dates.forEach((d, i) => { if (ds.peak[i] > pk) { pk = ds.peak[i]; pd = d; } });
     const v = votes.get(g.id), meta = found.get(g.id);
     games.push({
@@ -206,12 +213,13 @@ async function main() {
       created: g.created, updated: g.updated, maturity: meta?.maturity ?? "",
       desc: Array.from(g.description ?? "").slice(0, 300).join(""),
       icon: icons.get(g.id) ?? null, thumb: thumbs.get(g.id) ?? null, lists: meta ? [...meta.sorts] : [],
-      d1h: pct(playing, hourAgo(prev, hourMs, 1)),
-      d1: pct(playing, hourAgo(prev, hourMs, 24)) ?? pct(playing, ds.dates.length > 1 ? ds.peak[ds.dates.length - 2] : null),
-      d7: pct(playing, hourAgo(prev, hourMs, 168)) ?? pct(playing, ds.dates.length > 7 ? ds.peak[ds.dates.length - 8] : null),
+      d1h: pct(playing, slotAgo(prev, slotMs, 4) ?? hourAgo(prev, hourMs, 1)),
+      d15: pct(playing, slotAgo(prev, slotMs, 1)),
+      d1: pct(playing, hourAgo(prev, hourMs, 24)),
+      d7: pct(playing, hourAgo(prev, hourMs, 168)),
       high24: Math.max(playing, ...lastHours(hs, hourMs, 24).filter((x) => x != null)),
       peak: pk, peakDate: pd, days: ds.dates.length,
-      spark: lastHours(hs, hourMs, 24),
+      spark: hourly.filter((x) => x != null).length >= 4 ? hourly : qs.q.slice(-24),
     });
   }
 
@@ -226,9 +234,10 @@ async function main() {
 
   const total = games.reduce((a, g) => a + g.playing, 0);
   const th = putHour(prevTotal, hourMs, total, TOTAL_HOURS);
+  const tq = putSlot(prevTotal, slotMs, total);
   const td = putDay(prevTotal?.d, today, total, TOTAL_DAYS, true);
-  await writeFile(join(OUT, "total.json"), JSON.stringify({ h0: th.h0, h: th.h, d: td }));
-  await writeFile(join(OUT, "games.json"), JSON.stringify({ t: now.toISOString(), hour: hourMs, count: games.length, total, games }));
+  await writeFile(join(OUT, "total.json"), JSON.stringify({ h0: th.h0, h: th.h, ...tq, d: td }));
+  await writeFile(join(OUT, "games.json"), JSON.stringify({ t: now.toISOString(), hour: hourMs, slot: slotMs, count: games.length, total, games }));
   await writeFile(join(OUT, "tracked.json"), JSON.stringify(tracked));
   console.log(`ok: ${games.length} jogos, ${total.toLocaleString("pt-BR")} jogando, ${stats.calls} chamadas, ${stats.fails} falhas`);
 }

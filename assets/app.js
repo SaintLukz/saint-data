@@ -56,6 +56,8 @@ const BASE = window.SD_DATA || "https://raw.githubusercontent.com/SaintLukz/sain
 const HOUR = 3600e3;
 function lastN(arr, n) { return arr.slice(Math.max(0, arr.length - n)); }
 const spark = (g) => g.spark || [];
+const WIN = { d1: ["24h", "24h atrás", "Últimas 24h"], d1h: ["1h", "1h atrás", "Última hora"], d15: ["15 min", "15 min atrás", "Últimos 15 min"] };
+const ch = (g) => g[S.win] ?? null;
 function peakOf(g) { return g.peak > 0 && g.days > 1 ? { v: g.peak, date: g.peakDate } : null; }
 const hourlyPts = (s) => (s?.h || []).map((y, i) => ({ x: s.h0 + i * HOUR, y, hourly: true }));
 const dailyPts = (d, key = "peak") => (d?.dates || []).map((x, i) => ({ x: new Date(x + "T12:00:00").getTime(), y: d[key][i], hourly: false }));
@@ -78,6 +80,7 @@ function sparkline(vals, w = 48, h = 22) {
 /* ================= gráfico grande ================= */
 const hfmt = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 const when = (p) => (p.hourly ? hfmt.format(new Date(p.x)) : dshort.format(new Date(p.x)));
+function tipPos(tip, frac) { tip.style.left = frac * 100 + "%"; tip.style.transform = frac > 0.8 ? "translateX(-100%)" : frac < 0.2 ? "translateX(0)" : "translateX(-50%)"; }
 function bigChart(box, pts, fmt) {
   const real = pts.filter((p) => p.y != null);
   if (real.length < 2) {
@@ -101,34 +104,37 @@ function bigChart(box, pts, fmt) {
     <circle cx="${X(imax)}" cy="${Y(pts[imax].y)}" r="3" fill="var(--fg)"/>
     <circle cx="${X(last)}" cy="${Y(pts[last].y)}" r="9" fill="var(--accent)" opacity=".15"/><circle cx="${X(last)}" cy="${Y(pts[last].y)}" r="4" fill="var(--accent)" stroke="var(--bg)" stroke-width="1.5"/>
     <line class="hl" x1="0" x2="0" y1="${pt}" y2="${H}" stroke="var(--muted)" stroke-dasharray="3 3" visibility="hidden"/><circle class="hd" r="4" fill="var(--accent)" stroke="var(--bg)" stroke-width="1.5" visibility="hidden"/></svg>
-    <div class="tip" style="left:${(X(imax) / W) * 100}%">${esc(fmt(pts[imax].y))}<span>${when(pts[imax])}</span></div>`;
+    <div class="tip">${esc(fmt(pts[imax].y))}<span>${when(pts[imax])}</span></div>`;
   const svg = box.querySelector("svg"), tip = box.querySelector(".tip"), hl = svg.querySelector(".hl"), hd = svg.querySelector(".hd");
-  const reset = () => { hl.setAttribute("visibility", "hidden"); hd.setAttribute("visibility", "hidden"); tip.style.left = (X(imax) / W) * 100 + "%"; tip.innerHTML = `${esc(fmt(pts[imax].y))}<span>${when(pts[imax])}</span>`; };
+  const reset = () => { hl.setAttribute("visibility", "hidden"); hd.setAttribute("visibility", "hidden"); tipPos(tip, X(imax) / W); tip.innerHTML = `${esc(fmt(pts[imax].y))}<span>${when(pts[imax])}</span>`; };
   svg.addEventListener("pointermove", (e) => {
     const r = svg.getBoundingClientRect(), x = ((e.clientX - r.left) / r.width) * W;
     let b = last, bd = Infinity;
     pts.forEach((p, i) => { if (p.y != null && Math.abs(X(i) - x) < bd) { bd = Math.abs(X(i) - x); b = i; } });
     hl.setAttribute("x1", X(b)); hl.setAttribute("x2", X(b)); hl.setAttribute("visibility", "visible");
     hd.setAttribute("cx", X(b)); hd.setAttribute("cy", Y(pts[b].y)); hd.setAttribute("visibility", "visible");
-    tip.style.left = (X(b) / W) * 100 + "%";
+    tipPos(tip, X(b) / W);
     tip.innerHTML = `${esc(fmt(pts[b].y))}<span>${when(pts[b])}</span>`;
   });
   svg.addEventListener("pointerleave", reset);
+  tipPos(tip, X(imax) / W);
 }
-const RANGES = [["1D", 24, "h"], ["1S", 168, "h"], ["1M", 720, "h"], ["3M", 92, "d"], ["1A", 366, "d"], ["Tudo", Infinity, "d"]];
+const RANGES = [["6h", 24, "q"], ["24h", 96, "q"], ["7 dias", 168, "h"], ["30 dias", 720, "h"], ["3 meses", 92, "d"], ["1 ano", 366, "d"], ["Tudo", Infinity, "d"]];
+const quarterPts = (s) => (s?.q || []).map((y, i) => ({ x: s.q0 + i * 9e5, y, hourly: true }));
 function rangedChart(host, src, fmt, key) {
-  let range = store.get("sd-range-" + key, "1S"), mode = "live";
+  let range = store.get("sd-range2-" + key, "24h"), mode = "live";
   const draw = () => {
     const [, n, kind] = RANGES.find((r) => r[0] === range) ?? RANGES[1];
     let pts;
-    if (kind === "h" && mode === "live" && src.hourly) pts = lastN(hourlyPts(src.hourly), n);
-    else { const dd = kind === "h" ? Math.ceil(n / 24) : n; pts = dailyPts(src.daily); if (isFinite(dd)) pts = lastN(pts, dd); }
+    if (kind === "q" && mode === "live" && src.hourly) { pts = lastN(quarterPts(src.hourly), n); if (pts.filter((p) => p.y != null).length < 2) pts = lastN(hourlyPts(src.hourly), n / 4); }
+    else if (kind === "h" && mode === "live" && src.hourly) pts = lastN(hourlyPts(src.hourly), n);
+    else { const dd = kind === "d" ? n : Math.ceil(n / (kind === "q" ? 96 : 24)); pts = dailyPts(src.daily); if (isFinite(dd)) pts = lastN(pts, dd); }
     bigChart(host.querySelector(".chart"), pts, fmt);
     host.querySelectorAll("[data-range]").forEach((b) => b.classList.toggle("on", b.dataset.range === range));
     host.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
   };
   host.querySelector(".seg-row").innerHTML = `<div class="seg">${RANGES.map(([k]) => `<button type="button" data-range="${k}">${k}</button>`).join("")}</div><div class="seg"><button type="button" data-mode="live"><span class="live-dot"></span>Ao vivo</button><button type="button" data-mode="peak">Pico diário</button></div>`;
-  host.querySelectorAll("[data-range]").forEach((b) => b.addEventListener("click", () => { range = b.dataset.range; store.set("sd-range-" + key, range); draw(); }));
+  host.querySelectorAll("[data-range]").forEach((b) => b.addEventListener("click", () => { range = b.dataset.range; store.set("sd-range2-" + key, range); draw(); }));
   host.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => { mode = b.dataset.mode; draw(); }));
   draw();
 }
@@ -140,7 +146,7 @@ function buildStudios() {
     const k = g.creator || "Desconhecido";
     const e = m.get(k) ?? { name: k, verified: g.verified, type: g.creatorType, playing: 0, prev: 0, prevOk: true, visits: 0, games: [] };
     e.playing += g.playing; e.visits += g.visits; e.games.push(g);
-    if (g.d1 != null) e.prev += g.playing / (1 + g.d1); else e.prevOk = false;
+    if (ch(g) != null) e.prev += g.playing / (1 + ch(g)); else e.prevOk = false;
     m.set(k, e);
   }
   return [...m.values()].map((e) => ({ ...e, d1: e.prevOk && e.prev > 0 ? e.playing / e.prev - 1 : null, newest: Math.min(...e.games.map((g) => days(g.created))) })).sort((a, b) => b.playing - a.playing);
@@ -153,7 +159,7 @@ function genreStats() {
   for (const g of S.data.games) {
     const e = m.get(g.genre) ?? { genre: g.genre, playing: 0, prev: 0, ok: true, n: 0 };
     e.playing += g.playing; e.n++;
-    if (g.d1 != null) e.prev += g.playing / (1 + g.d1); else e.ok = false;
+    if (ch(g) != null) e.prev += g.playing / (1 + ch(g)); else e.ok = false;
     m.set(g.genre, e);
   }
   const tot = S.data.total || 1;
@@ -204,7 +210,7 @@ function rowPlain(g, sub, right, rightSub = "") {
 }
 function rowStar(g) {
   const on = S.watch.has(g.id);
-  return `<div class="r star"><a href="${gl(g)}">${icon(g)}</a><a class="t" href="${gl(g)}"><span class="nm">${esc(g.name)}</span><span class="sb">${esc(genre(g.genre))}</span></a><span class="v">${compact(g.playing)}${chg(g.d7 ?? g.d1)}</span><button class="star-btn${on ? " on" : ""}" type="button" data-star="${g.id}" aria-label="${on ? "Remover da" : "Adicionar à"} watchlist">${starSvg(on)}</button></div>`;
+  return `<div class="r star"><a href="${gl(g)}">${icon(g)}</a><a class="t" href="${gl(g)}"><span class="nm">${esc(g.name)}</span><span class="sb">${esc(genre(g.genre))}</span></a><span class="v">${compact(g.playing)}${chg(ch(g))}</span><button class="star-btn${on ? " on" : ""}" type="button" data-star="${g.id}" aria-label="${on ? "Remover da" : "Adicionar à"} watchlist">${starSvg(on)}</button></div>`;
 }
 function wireStars(root, rerender) {
   root.querySelectorAll("[data-star]").forEach((b) => b.addEventListener("click", (e) => {
@@ -220,17 +226,24 @@ const empty = (t) => `<p class="empty">${t}</p>`;
 /* ================= páginas ================= */
 function pageHome() {
   const G = S.data.games, T = S.total;
-  const prev = (() => { const i = Math.round((S.data.hour - 24 * HOUR - T.h0) / HOUR); return i >= 0 ? T.h[i] ?? null : null; })();
-  const hasD1 = G.some((g) => g.d1 != null);
-  const rising = G.filter((g) => g.d1 != null && g.playing >= 2000).sort((a, b) => b.d1 - a.d1).slice(0, 4);
+  const prev = (() => {
+    const fromQ = (n) => { if (T.q0 == null) return null; const i = Math.round((S.data.slot - n * 9e5 - T.q0) / 9e5); return i >= 0 ? T.q[i] ?? null : null; };
+    const fromH = (n) => { const i = Math.round((S.data.hour - n * HOUR - T.h0) / HOUR); return i >= 0 ? T.h[i] ?? null : null; };
+    return S.win === "d1" ? fromH(24) : S.win === "d1h" ? fromQ(4) ?? fromH(1) : fromQ(1);
+  })();
+  const hasD1 = G.some((g) => ch(g) != null);
+  const [wS, wAgo, wLong] = WIN[S.win] || WIN.d1;
+  const rising = G.filter((g) => ch(g) != null && g.playing >= 2000).sort((a, b) => b.d1 - a.d1).slice(0, 4);
   const trending = G.filter((g) => g.lists?.includes("top-trending")).slice(0, 3);
   const gen = genreStats().slice(0, 4);
   const ms = milestones().slice(0, 3);
   const studios = S.studios.slice(0, 4);
   const fresh = G.filter((g) => days(g.created) <= 30).slice(0, 4);
   const updated = G.slice().sort((a, b) => new Date(b.updated) - new Date(a.updated)).slice(0, 4);
-  const breakouts = G.map((g) => ({ g, p: peakOf(g) })).filter((x) => x.p && x.g.playing < x.p.v * 0.6).sort((a, b) => b.p.v - a.p.v).slice(0, 4);
-  const ups = G.filter((g) => g.d1 > 0).length, downs = G.filter((g) => g.d1 < 0).length;
+  let breakouts = G.map((g) => ({ g, p: peakOf(g) })).filter((x) => x.p && x.g.playing < x.p.v * 0.6).sort((a, b) => b.p.v - a.p.v).slice(0, 4);
+  const brkFromDay = breakouts.length === 0;
+  if (brkFromDay) breakouts = G.filter((g) => g.high24 > 2000 && g.playing < g.high24 * 0.85).map((g) => ({ g, p: { v: g.high24 } })).sort((a, b) => b.p.v - b.g.playing - (a.p.v - a.g.playing)).slice(0, 4);
+  const ups = G.filter((g) => ch(g) > 0).length, downs = G.filter((g) => ch(g) < 0).length;
   const atPeak = G.some((g) => spark(g).filter((v) => v != null).length > 1) ? G.filter((g) => g.playing >= g.high24 && spark(g).filter((v) => v != null).length > 1).length : null;
   const sorted = G.map((g) => g.playing);
   let half = 0, acc = 0; for (const v of sorted) { acc += v; half++; if (acc >= S.data.total / 2) break; }
@@ -243,14 +256,14 @@ function pageHome() {
     <section class="hero" id="hero">
       <div class="hero-lbl">Jogando agora nos ${nf.format(G.length)} maiores jogos</div>
       <div class="hero-num">${nf.format(S.data.total)}</div>
-      <div class="hero-delta">${prev ? `<span class="chg ${S.data.total >= prev ? "up" : "down"}"><span class="tri">${S.data.total >= prev ? "▲" : "▼"}</span>${compact(Math.abs(S.data.total - prev))} (${chg(S.data.total / prev - 1, { plain: true }).replace(/<[^>]+>/g, "")})</span><span class="muted">Últimas 24h</span>` : `<span class="muted">Primeira coleta · ${ago(S.data.t)}</span>`}</div>
+      <div class="hero-delta">${prev ? `<span class="chg ${S.data.total >= prev ? "up" : "down"}"><span class="tri">${S.data.total >= prev ? "▲" : "▼"}</span>${compact(Math.abs(S.data.total - prev))} (${chg(S.data.total / prev - 1, { plain: true }).replace(/<[^>]+>/g, "")})</span><span class="muted">${wLong}</span>` : `<span class="muted">Coletado ${ago(S.data.t)}</span>`}</div>
       <div class="chart"></div>
       <div class="seg-row"></div>
     </section>
     <div class="grid2">
-      ${card("Subindo", "Últimas 24h", "#/jogos/subindo", hasD1 ? `<div class="rows">${rising.map((g) => rowSpark(g, `${compact(g.playing)} jogando`, chg(g.d1))).join("")}</div>` : empty("A variação de 24h aparece quando houver 24 horas de coleta."))}
+      ${card("Subindo", hasD1 ? wLong : "Promissores no Roblox", "#/jogos/subindo", `<div class="rows">${(hasD1 ? rising : G.filter((g) => g.lists?.includes("up-and-coming")).slice(0, 4)).map((g) => rowSpark(g, `${compact(g.playing)} jogando`, hasD1 ? chg(ch(g)) : '<span class="sbv">novo</span>')).join("")}</div>`)}
       ${card("Em alta", "Lista do Roblox", "#/jogos", `<div class="rows">${trending.map((g) => rowPlain(g, esc(genre(g.genre)), compact(g.playing), '<span class="sbv">jogando</span>')).join("") || empty("Sem dados.")}</div>`)}
-      ${card("Gêneros", `Top ${nf.format(G.length)} · jogadores vs 24h atrás`, "#/generos", gen.map((x) => `<a class="hbar" href="#/genero/${encodeURIComponent(x.genre)}"><span class="l">${esc(genre(x.genre))}</span><span class="trk"><i style="width:${(x.share / gen[0].share) * 100}%"></i></span><span class="p">${Math.round(x.share * 100)}%</span>${chg(x.d1)}</a>`).join(""))}
+      ${card("Gêneros", `Top ${nf.format(G.length)} · vs ${wAgo}`, "#/generos", gen.map((x) => `<a class="hbar" href="#/genero/${encodeURIComponent(x.genre)}"><span class="l">${esc(genre(x.genre))}</span><span class="trk"><i style="width:${(x.share / gen[0].share) * 100}%"></i></span><span class="p">${Math.round(x.share * 100)}%</span>${chg(x.d1)}</a>`).join(""))}
       ${card("Marcos", "Perto do próximo", "#/jogos", ms.map(({ g, next, frac }) => `<a class="ms" href="${gl(g)}">${icon(g)}<span class="t" style="min-width:0"><span class="nm" style="font-size:13px;font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(g.name)}</span><span class="trk"><i style="width:${frac * 100}%"></i></span></span><span class="v">${compact(next)}<small>faltam ${compact(next - g.playing)}</small></span></a>`).join("") || empty("Nenhum jogo perto de um marco."))}
     </div>
   </div>
@@ -266,20 +279,20 @@ function pageHome() {
   <div class="wrap" style="max-width:960px">
     <h2 class="sec-title">Mais jogos</h2>
     <div class="grid3" style="margin-top:12px">
-      ${card("Quedas desde o pico", "Como estão agora", "#/jogos/caindo", breakouts.length ? `<div class="rows">${breakouts.map(({ g, p }) => `<a class="r" href="${gl(g)}">${icon(g)}<span class="t"><span class="nm">${esc(g.name)}</span><span class="sb">Pico ${compact(p.v)} · agora ${compact(g.playing)}</span></span><span class="chip">Perdeu ${Math.round((1 - g.playing / p.v) * 100)}%</span></a>`).join("")}</div>` : empty("Aparece quando houver alguns dias de histórico."))}
-      ${card("Novos e crescendo", "Menos de 30 dias", "#/jogos/novos", `<div class="rows">${fresh.map((g) => rowSpark(g, `${Math.max(0, Math.round(days(g.created)))} dias · ${compact(g.playing)}`, chg(g.d1))).join("") || empty("Nenhum jogo novo no top.")}</div>`)}
+      ${card(brkFromDay ? "Abaixo da máxima" : "Quedas desde o pico", brkFromDay ? "Máxima das últimas 24h" : "Como estão agora", "#/jogos/caindo", breakouts.length ? `<div class="rows">${breakouts.map(({ g, p }) => `<a class="r" href="${gl(g)}">${icon(g)}<span class="t"><span class="nm">${esc(g.name)}</span><span class="sb">${brkFromDay ? "Máx." : "Pico"} ${compact(p.v)} · agora ${compact(g.playing)}</span></span><span class="chip">Perdeu ${Math.round((1 - g.playing / p.v) * 100)}%</span></a>`).join("")}</div>` : empty("Nenhum jogo grande muito abaixo da máxima agora."))}
+      ${card("Novos e crescendo", "Menos de 30 dias", "#/jogos/novos", `<div class="rows">${fresh.map((g) => rowSpark(g, `${Math.max(0, Math.round(days(g.created)))} dias · ${compact(g.playing)}`, chg(ch(g)))).join("") || empty("Nenhum jogo novo no top.")}</div>`)}
       ${card("Recém-atualizados", "Novas versões", "#/jogos/atualizados", `<div class="rows">${updated.map((g) => rowSpark(g, `${compact(g.playing)} jogando`, `<span class="sbv">${ago(g.updated)}</span>`)).join("")}</div>`)}
     </div>
     <h2 class="sec-title">Todo o Roblox</h2>
     <div class="grid3" style="margin-top:12px">
-      ${card("Top estúdios", "vs 24h atrás", "#/estudios", `<div class="rows">${studios.map((st) => `<a class="r" href="${sl(st.name)}">${icon(st.games[0])}<span class="t"><span class="nm">${esc(st.name)}</span><span class="sb">${esc(st.games[0].name)}${st.games.length > 1 ? ` + ${st.games.length - 1} mais` : ""}</span></span><span class="v">${compact(st.playing)}${chg(st.d1)}</span></a>`).join("")}</div>`)}
-      ${card("Todos os jogos", `Top ${nf.format(G.length)} · vs 24h atrás`, "#/jogos", `
+      ${card("Top estúdios", "vs " + wAgo, "#/estudios", `<div class="rows">${studios.map((st) => `<a class="r" href="${sl(st.name)}">${icon(st.games[0])}<span class="t"><span class="nm">${esc(st.name)}</span><span class="sb">${esc(st.games[0].name)}${st.games.length > 1 ? ` + ${st.games.length - 1} mais` : ""}</span></span><span class="v">${compact(st.playing)}${chg(st.d1)}</span></a>`).join("")}</div>`)}
+      ${card("Todos os jogos", `Top ${nf.format(G.length)} · vs ${wAgo}`, "#/jogos", `
         <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600"><span class="up">${hasD1 ? nf.format(ups) + " subindo" : "—"}</span><span class="down">${hasD1 ? nf.format(downs) + " caindo" : ""}</span></div>
         <div class="ud-bar">${hasD1 ? `<i style="flex:${ups};background:var(--up)"></i><i style="flex:${downs};background:var(--down)"></i>` : '<i style="flex:1;background:var(--card-2)"></i>'}</div>
         <div class="kv"><span>Na máxima de 24h</span><b>${atPeak == null ? "—" : nf.format(atPeak)}</b></div>
         <div class="kv"><span>Atualizados no último dia</span><b>${nf.format(G.filter((g) => days(g.updated) <= 1).length)}</b></div>
         <div class="kv"><span>Com menos de 30 dias</span><b>${nf.format(G.filter((g) => days(g.created) <= 30).length)}</b></div>`)}
-      ${card("Mapa de calor", hasD1 ? "Últimas 24h" : "Por jogadores", "#/jogos", '<div class="tm" id="tm"></div>')}
+      ${card("Mapa de calor", hasD1 ? wLong : "Por jogadores", "#/jogos", '<div class="tm" id="tm"></div>')}
     </div>
     <h2 class="sec-title">Mais estatísticas</h2>
     <div class="grid3" style="margin-top:12px">
@@ -300,9 +313,9 @@ function pageHome() {
   const W = tm.clientWidth || 260, H = tm.clientHeight || 172;
   const items = G.slice(0, 40).map((g) => ({ g, v: g.playing }));
   tm.innerHTML = treemap(items, W, H).map(({ g, x, y, w, h }) => {
-    const c = g.d1 == null ? "hsl(212 70% 46%)" : g.d1 >= 0 ? `hsl(140 ${45 + Math.min(40, g.d1 * 200)}% ${40 - Math.min(10, g.d1 * 40)}%)` : `hsl(2 ${50 + Math.min(35, -g.d1 * 200)}% 48%)`;
+    const c = ch(g) == null ? "hsl(212 70% 46%)" : ch(g) >= 0 ? `hsl(140 ${45 + Math.min(40, ch(g) * 200)}% ${40 - Math.min(10, ch(g) * 40)}%)` : `hsl(2 ${50 + Math.min(35, -ch(g) * 200)}% 48%)`;
     const big = w > 70 && h > 60;
-    return `<a href="${gl(g)}" title="${esc(g.name)}" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;background:${c}">${w > 26 && h > 26 && g.icon ? `<img src="${esc(g.icon)}" alt="" referrerpolicy="no-referrer">` : ""}${big ? `<span>${esc(g.name.slice(0, 22))}<br>${g.d1 == null ? compact(g.playing) : chg(g.d1, { plain: true }).replace(/<[^>]+>/g, "").replace(/^/, g.d1 >= 0 ? "+" : "−")}</span>` : ""}</a>`;
+    return `<a href="${gl(g)}" title="${esc(g.name)}" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;background:${c}">${w > 26 && h > 26 && g.icon ? `<img src="${esc(g.icon)}" alt="" referrerpolicy="no-referrer">` : ""}${big ? `<span>${esc(g.name.slice(0, 22))}<br>${ch(g) == null ? compact(g.playing) : chg(ch(g), { plain: true }).replace(/<[^>]+>/g, "").replace(/^/, ch(g) >= 0 ? "+" : "−")}</span>` : ""}</a>`;
   }).join("");
 }
 function monthly() {
@@ -323,7 +336,7 @@ function mostPlayed() {
   if (tab === "wl") { const w = S.data.games.filter((g) => S.watch.has(g.id)).slice(0, 7); body = w.length ? w.map(rowStar).join("") : empty("Sua watchlist está vazia. Toque na estrela de um jogo para adicionar."); }
   else if (tab === "st") body = S.studios.slice(0, 7).map((st) => `<a class="r" href="${sl(st.name)}" style="grid-template-columns:34px minmax(0,1fr) auto">${icon(st.games[0], "ic")}<span class="t"><span class="nm">${esc(st.name)}</span><span class="sb">${st.games.length} ${st.games.length === 1 ? "jogo" : "jogos"}</span></span><span class="v">${compact(st.playing)}${chg(st.d1)}</span></a>`).join("");
   else body = S.data.games.slice(0, 7).map(rowStar).join("");
-  box.innerHTML = `<div class="card-h"><div class="tabs-text"><button type="button" data-t="mp" class="${tab === "mp" ? "on" : ""}">Mais jogados</button><button type="button" data-t="wl" class="${tab === "wl" ? "on" : ""}">Watchlist</button><button type="button" data-t="st" class="${tab === "st" ? "on" : ""}">Estúdios</button></div><a class="go" href="${tab === "st" ? "#/estudios" : tab === "wl" ? "#/meus-jogos" : "#/jogos"}" aria-label="Ver tudo">${goIcon}</a></div><div class="rows">${body}</div><div class="card-foot">${S.data.games[0].d7 != null ? "vs esta hora na semana passada" : "vs 24h atrás"} · top ${nf.format(S.data.games.length)} jogos por jogadores agora</div>`;
+  box.innerHTML = `<div class="card-h"><div class="tabs-text"><button type="button" data-t="mp" class="${tab === "mp" ? "on" : ""}">Mais jogados</button><button type="button" data-t="wl" class="${tab === "wl" ? "on" : ""}">Watchlist</button><button type="button" data-t="st" class="${tab === "st" ? "on" : ""}">Estúdios</button></div><a class="go" href="${tab === "st" ? "#/estudios" : tab === "wl" ? "#/meus-jogos" : "#/jogos"}" aria-label="Ver tudo">${goIcon}</a></div><div class="rows">${body}</div><div class="card-foot">${"vs " + (WIN[S.win] || WIN.d1)[1]} · top ${nf.format(S.data.games.length)} jogos por jogadores agora</div>`;
   box.querySelectorAll("[data-t]").forEach((b) => b.addEventListener("click", () => { store.set("sd-mp", b.dataset.t); mostPlayed(); }));
   wireStars(box, mostPlayed);
 }
@@ -336,8 +349,8 @@ function gameList(tab, genreFilter) {
   let G = S.data.games.slice();
   if (genreFilter != null) G = G.filter((g) => g.genre === genreFilter);
   switch (tab) {
-    case "subindo": return G.filter((g) => g.d1 != null && g.playing >= 500).sort((a, b) => b.d1 - a.d1);
-    case "caindo": return G.filter((g) => g.d1 != null && g.playing >= 500).sort((a, b) => a.d1 - b.d1);
+    case "subindo": return G.filter((g) => ch(g) != null && g.playing >= 500).sort((a, b) => b.d1 - a.d1);
+    case "caindo": return G.filter((g) => ch(g) != null && g.playing >= 500).sort((a, b) => a.d1 - b.d1);
     case "novos": return G.filter((g) => days(g.created) <= 60);
     case "atualizados": return G.sort((a, b) => new Date(b.updated) - new Date(a.updated));
     case "joias": return G.filter((g) => (likes(g) ?? 0) >= 0.9 && g.playing < 20000 && g.up + g.down > 2000).sort((a, b) => likes(b) - likes(a));
@@ -366,7 +379,7 @@ function pageGames(tab = "mais-jogados", { genreFilter = null, title } = {}) {
   const render = () => {
     let list = gameList(tab, genreFilter);
     if (q) list = list.filter((g) => g.name.toLowerCase().includes(q) || (g.creator || "").toLowerCase().includes(q));
-    const note = (tab === "subindo" || tab === "caindo") && !S.data.games.some((g) => g.d1 != null) ? '<p class="empty">Subindo e Caindo aparecem quando houver 24 horas de coleta.</p>' : "";
+    const note = tab === "subindo" || tab === "caindo" ? `<p class="empty" style="padding-top:0">Comparando com ${(WIN[S.win] || WIN.d1)[1]}.</p>` : "";
     document.getElementById("tbl").innerHTML = note + gamesTable(list, { limit, extraCol: extra }) + (list.length > limit ? `<button class="more-btn" id="more" type="button">Mostrar mais (${nf.format(list.length - limit)})</button>` : "");
     wireRows(document.getElementById("tbl"));
     document.getElementById("more")?.addEventListener("click", () => { limit += 200; render(); });
@@ -403,7 +416,7 @@ function pageStudios(tab = "mais-jogados") {
   if (tab === "novos") list = list.filter((s) => s.newest <= 60);
   $view.innerHTML = `<div class="wrap fade"><div class="page-title"><i class="app-ic" style="--c1:#ffb35c;--c2:#f57b16"><svg viewBox="0 0 20 20"><rect x="6" y="3.5" width="8" height="13" rx="1.5" fill="#fff"/><path d="M8.3 6.5h1.2M10.5 6.5h1.2M8.3 9h1.2M10.5 9h1.2M8.3 11.5h1.2M10.5 11.5h1.2" stroke="#f57b16" stroke-width="1.2"/></svg></i>Estúdios</div>
     <div class="toolbar"><div class="seg">${[["mais-jogados", "Mais jogados"], ["subindo", "Subindo"], ["caindo", "Caindo"], ["novos", "Novos"]].map(([k, t]) => `<button type="button" data-tab="${k}" class="${k === tab ? "on" : ""}">${t}</button>`).join("")}</div></div>
-    ${(tab === "subindo" || tab === "caindo") && !list.length ? '<p class="empty">Aparece quando houver 24 horas de coleta.</p>' : ""}
+    ${tab === "subindo" || tab === "caindo" ? `<p class="empty" style="padding-top:0">Comparando com ${(WIN[S.win] || WIN.d1)[1]}.</p>` : ""}
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>#</th><th class="l">Estúdio</th><th>Jogos</th><th>↓ Jogando</th><th>24H</th><th>Tendência</th></tr></thead><tbody>
     ${list.slice(0, 300).map((s, i) => `<tr data-href="${sl(s.name)}"><td class="rk ${i < 3 ? "g" + (i + 1) : ""}">${i + 1}</td><td class="l"><a class="gname" href="${sl(s.name)}">${icon(s.games[0])}<span><b>${esc(s.name)}${s.verified ? ' <span style="color:var(--accent)">✓</span>' : ""}</b><small>${esc(s.games[0].name)}${s.games.length > 1 ? ` + ${s.games.length - 1} mais` : ""}</small></span></a></td><td>${s.games.length}</td><td class="pl">${compact(s.playing)}</td><td>${chg(s.d1)}</td><td style="width:96px">${sparkline(studioSpark(s), 80, 24)}</td></tr>`).join("")}
     </tbody></table></div></div>`;
@@ -416,7 +429,7 @@ function pageStudio(name) {
   const rank = S.studios.indexOf(s) + 1;
   $view.innerHTML = `<div class="wrap fade"><a class="back" href="#/estudios">← Estúdios</a>
     <div class="g-head">${icon(s.games[0], "ic xl")}<div><h1>${esc(s.name)}</h1><div class="by"><span class="chip">#${rank} estúdio</span><span class="muted">${s.type === "Group" ? "Grupo" : "Usuário"}${s.verified ? " · verificado" : ""}</span></div></div></div>
-    <section class="hero" id="sh"><div class="hero-lbl">Jogando agora em ${s.games.length} ${s.games.length === 1 ? "jogo" : "jogos"} do top</div><div class="hero-num">${nf.format(s.playing)}</div><div class="hero-delta">${chg(s.d1)}<span class="muted">vs 24h atrás · ${compact(s.visits)} visitas somadas</span></div><div class="chart"></div><div class="seg-row"></div></section>
+    <section class="hero" id="sh"><div class="hero-lbl">Jogando agora em ${s.games.length} ${s.games.length === 1 ? "jogo" : "jogos"} do top</div><div class="hero-num">${nf.format(s.playing)}</div><div class="hero-delta">${chg(s.d1)}<span class="muted">vs ${(WIN[S.win] || WIN.d1)[1]} · ${compact(s.visits)} visitas somadas</span></div><div class="chart"></div><div class="seg-row"></div></section>
     <div style="margin-top:22px">${gamesTable(s.games)}</div></div>`;
   const sp = studioSpark(s);
   const host = document.getElementById("sh");
@@ -439,7 +452,7 @@ function pageGame(id) {
       <div class="acts"><button class="pill-btn icon${on ? " on" : ""}" type="button" id="gstar" aria-label="Watchlist">${starSvg(on)}</button><a class="pill-btn" href="https://www.roblox.com/games/${g.place}" target="_blank" rel="noopener">Abrir no Roblox ↗</a></div></div>
     <div class="g-grid"><div style="min-width:0">
       <section class="hero" id="gh"><div class="hero-num" style="margin-top:0">${nf.format(g.playing)}</div>
-        <div class="hero-delta">${since != null ? `<span class="chg ${since >= 0 ? "up" : "down"}"><span class="tri">${since >= 0 ? "▲" : "▼"}</span>${compact(Math.abs(since))} (${(Math.abs(since / firstVal) * 100).toFixed(1).replace(".", ",")}%)</span><span class="muted">Desde o início do acompanhamento</span>` : `${chg(g.d1)}<span class="muted">Últimas 24h · coletado ${ago(S.data.t)}</span>`}</div>
+        <div class="hero-delta">${since != null ? `<span class="chg ${since >= 0 ? "up" : "down"}"><span class="tri">${since >= 0 ? "▲" : "▼"}</span>${compact(Math.abs(since))} (${(Math.abs(since / firstVal) * 100).toFixed(1).replace(".", ",")}%)</span><span class="muted">Desde o início do acompanhamento</span>` : `${chg(ch(g))}<span class="muted">${(WIN[S.win] || WIN.d1)[2]} · coletado ${ago(S.data.t)}</span>`}</div>
         <div class="chart"></div><div class="seg-row"></div></section>
       <div class="strip"><div><small>Rank</small><b>#${rank}</b></div><div><small>Aprovação</small><b>${lk == null ? "—" : Math.round(lk * 100) + "%"}</b></div><div class="hot"><small>Visitas</small><b>${compact(g.visits)}</b></div><div class="hot"><small>Favoritos</small><b>${compact(g.fav)}</b></div><div><small>Máx. 24h</small><b>${compact(g.high24)}</b></div></div>
       <div class="g-tabs"><button type="button" data-gt="ov" class="on">Visão geral</button><button type="button" data-gt="ab">Sobre</button></div>
@@ -469,12 +482,14 @@ function pageGame(id) {
       const y = arr.length > 1 ? arr[arr.length - 2] : null;
       const wk = lastN(arr.filter((v) => v != null), 7);
       const avg7 = wk.length ? wk.reduce((a, b) => a + b, 0) / wk.length : null;
-      const status = g.d1 == null ? ["Novo no histórico", ""] : g.d1 > 0.25 ? ["Disparando", "green"] : g.d1 > 0.02 ? ["Subindo", "green"] : g.d1 < -0.02 ? ["Caindo", ""] : ["Estável", ""];
+      const firstDay = (hist?.d?.dates?.length ?? 1) < 2;
+      const sp = spark(g).filter((v) => v != null), lo24 = sp.length ? Math.min(...sp) : null;
+      const status = ch(g) == null ? ["Novo no histórico", ""] : ch(g) > 0.25 ? ["Disparando", "green"] : ch(g) > 0.02 ? ["Subindo", "green"] : ch(g) < -0.02 ? ["Caindo", ""] : ["Estável", ""];
       return `<div class="g-sec"><h2>Momento <span class="chip ${status[1]}">${status[0]}</span></h2>
-        <p class="lead">${compact(g.playing)} <span>jogando agora</span>${y ? `, <b class="${g.playing >= y ? "up" : "down"}">${(g.playing / y).toFixed(1).replace(".", ",")}×</b> <span>o pico de ontem.</span>` : "<span>.</span>"}</p>
+        <p class="lead">${compact(g.playing)} <span>jogando agora</span>${y && !firstDay ? `, <b class="${g.playing >= y ? "up" : "down"}">${(g.playing / y).toFixed(1).replace(".", ",")}×</b> <span>o pico de ontem.</span>` : g.high24 ? `<span>, ${Math.round((g.playing / g.high24) * 100)}% da máxima das últimas 24h.</span>` : "<span>.</span>"}</p>
         <div class="muted" style="font-size:12.5px">Pico de jogadores por dia · últimos 14 dias</div>
         <div class="dbars">${d14.map((x, i) => `<div><i class="${i === d14.length - 1 ? "now" : ""}" style="height:${x.v == null ? 2 : Math.max(3, (x.v / mx) * 100)}%"></i><span>${i === d14.length - 1 ? "Hoje" : W[dt(x.d).getDay()]}</span></div>`).join("")}</div>
-        <div class="trio"><div><small>Média de 7 dias</small><b>${compact(avg7)}</b></div><div><small>Pico de ontem</small><b>${compact(y)}</b>${g.d7 != null ? `<span>${chg(g.d7)} vs semana passada</span>` : ""}</div><div><small>Do pico</small><b>${p && p.v > 0 ? (g.playing === p.v ? "No pico" : "−" + ((1 - g.playing / p.v) * 100).toFixed(1).replace(".", ",") + "%") : "—"}</b>${p ? `<span>${compact(p.v)} em ${dshort.format(dt(p.date))}</span>` : ""}</div></div></div>`;
+        ${firstDay ? `<div class="trio"><div><small>Máxima de 24h</small><b>${compact(g.high24)}</b><span>no período coletado</span></div><div><small>Mínima de 24h</small><b>${compact(lo24)}</b><span>no período coletado</span></div><div><small>Última hora</small><b>${g.d1h == null ? compact(g.playing) : chg(g.d1h)}</b><span>${g.d1h == null ? "jogando agora" : "vs 1h atrás"}</span></div></div></div>` : `<div class="trio"><div><small>Média de 7 dias</small><b>${compact(avg7)}</b></div><div><small>Pico de ontem</small><b>${compact(y)}</b>${g.d7 != null ? `<span>${chg(g.d7)} vs semana passada</span>` : ""}</div><div><small>Do pico</small><b>${p && p.v > 0 ? (g.playing === p.v ? "No pico" : "−" + ((1 - g.playing / p.v) * 100).toFixed(1).replace(".", ",") + "%") : "—"}</b>${p ? `<span>${compact(p.v)} em ${dshort.format(dt(p.date))}</span>` : ""}</div></div></div>`}`;
     },
     ab: () => `<div class="g-sec"><h2>Descrição</h2><p class="desc">${esc(g.desc) || "Sem descrição."}</p></div>
       <div class="g-sec"><h2>Ficha</h2><div class="facts" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div>Criado<b>${dlong.format(new Date(g.created))}</b></div><div>Atualizado<b>${dlong.format(new Date(g.updated))}</b></div><div>Gênero<b>${esc(genre(g.genre))}${g.genre2 ? " · " + esc(g.genre2) : ""}</b></div><div>Classificação<b>${esc(g.maturity || "—")}</b></div><div>Votos<b>${compact(g.up + g.down)}</b></div><div>ID do universo<b>${g.id}</b></div></div></div>`,
@@ -573,6 +588,8 @@ async function load() {
   try {
     const [data, total] = await Promise.all(["games.json", "total.json"].map((u) => fetch(BASE + u, { cache: "no-cache" }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status} em ${u}`); return r.json(); })));
     S.data = data; S.total = total;
+    const has = (k) => data.games.filter((g) => g[k] != null).length > data.games.length * 0.3;
+    S.win = has("d1") ? "d1" : has("d1h") ? "d1h" : has("d15") ? "d15" : "d1";
     S.byId = new Map(data.games.map((g) => [g.id, g]));
     S.rank = new Map(data.games.map((g, i) => [g.id, i + 1]));
     S.studios = buildStudios();
