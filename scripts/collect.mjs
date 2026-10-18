@@ -97,6 +97,31 @@ async function discover() {
   return found;
 }
 
+// Busca do Roblox: a cada hora testa um lote diferente de palavras para achar jogos fora das listas.
+const SEED_WORDS = ["simulator", "tycoon", "obby", "tower defense", "anime", "rpg", "horror", "roleplay", "brainrot", "steal", "egg", "pets", "fish", "farm", "battle", "survive", "escape", "race", "parkour", "fighting", "sword", "gun", "zombie", "mining", "clicker", "idle", "story", "hide and seek", "dress", "cafe", "restaurant", "hotel", "school", "prison", "police", "army", "war", "pvp", "tycoon 2", "grow", "garden", "basketball", "soccer", "football", "car", "driving", "plane", "boat", "dragon", "ninja", "pirate", "magic", "spleef", "tag", "murder", "mystery", "doors", "backrooms", "piggy", "rainbow", "lifting", "strongman", "speed", "jump", "rng", "aura", "gacha", "cards", "trading", "admin", "+1", "every second", "difficulty chart", "skibidi", "toilet", "hunt", "forest", "nights", "evade", "blox", "life", "city", "island", "spongebob", "dance", "music", "ugc", "avatar", "brookhaven", "adopt", "bee", "cat", "dog", "slime", "ball", "bowling", "golf", "tennis", "boxing", "wrestling", "jujutsu", "one piece", "demon", "titan", "hero", "villain", "superhero", "space", "rocket", "robot", "mech"];
+async function searchDiscover(tracked, hourMs) {
+  const found = new Map();
+  const words = [...new Set(SEED_WORDS)];
+  const per = 24, start = (Math.floor(hourMs / HOUR) * per) % words.length;
+  const batch = Array.from({ length: per }, (_, i) => words[(start + i) % words.length]);
+  for (const q of batch) {
+    const sid = randomUUID();
+    let token = "", pages = 0;
+    do {
+      const j = await getJSON(`https://apis.roblox.com/search-api/omni-search?searchQuery=${encodeURIComponent(q)}&sessionId=${sid}&pageType=all${token ? "&pageToken=" + encodeURIComponent(token) : ""}`, 3);
+      if (!j) break;
+      for (const grp of j.searchResults ?? []) for (const c of grp.contents ?? []) {
+        const id = c.universeId ?? c.contentId;
+        if (id && (c.playerCount ?? 1) > 0 && (grp.contentGroupType ?? "Game") === "Game") found.set(Number(id), true);
+      }
+      token = j.nextPageToken || ""; pages++;
+      await sleep(process.env.FAST ? 0 : 250);
+    } while (token && pages < 6);
+  }
+  console.log(`busca: ${found.size} jogos em ${batch.length} palavras`);
+  return found;
+}
+
 // Na primeira execução deste formato, aproveita o histórico diário antigo (data/ do ramo main).
 async function migrateOld() {
   const old = await readJSON("data/series.json", null);
@@ -129,6 +154,7 @@ async function main() {
 
   const found = await discover();
   for (const id of found.keys()) tracked[id] = today;
+  for (const id of (await searchDiscover(tracked, hourMs)).keys()) tracked[id] ??= today;
   const cutoff = new Date(now.getTime() - TRACK_DAYS * 864e5).toISOString().slice(0, 10);
   const ids = Object.keys(tracked).filter((id) => tracked[id] >= cutoff).map(Number);
   console.log(`acompanhando ${ids.length} jogos`);
@@ -141,7 +167,7 @@ async function main() {
   }
   if (details.size < Math.min(200, ids.length * 0.5)) throw new Error(`poucos dados (${details.size} de ${ids.length}); mantendo a versão anterior`);
 
-  const ranked = [...details.values()].sort((a, b) => (b.playing ?? 0) - (a.playing ?? 0));
+  const ranked = [...details.values()].filter((g) => (g.playing ?? 0) > 0).sort((a, b) => (b.playing ?? 0) - (a.playing ?? 0));
   const keep = ranked.slice(0, MAX_GAMES);
   const keepIds = keep.map((g) => g.id);
   const trackKeep = new Set(ranked.slice(0, TRACK_LIMIT).map((g) => String(g.id)));
