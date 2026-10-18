@@ -1,0 +1,36 @@
+name: Coleta diária
+
+on:
+  schedule:
+    - cron: "7 20 * * *" # todo dia às 17:07 (horário de Brasília)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: coleta
+  cancel-in-progress: false
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Coletar dados do Roblox
+        run: node scripts/collect.mjs
+      - name: Salvar dados
+        run: |
+          git config user.name "saint-data-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "Nada mudou."
+          else
+            git commit -m "dados: $(date -u +%Y-%m-%d)"
+            git push
+          fi
