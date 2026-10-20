@@ -292,7 +292,7 @@ function totalSeries(metric, range) {
   let arr, note = "";
   const span = { live: 3 * HOUR, "1d": DAY, "1w": 7 * DAY, "1m": 30 * DAY, "1y": 365 * DAY, all: Infinity }[range];
   if (metric === "total") {
-    if (range === "live" || range === "1d") arr = sinceT(fine("total"), now - span);
+    if (range === "live" || range === "1d") { arr = sinceT(fine("total"), now - span); if (arr.filter((p) => p.y != null).length < 6) { arr = sinceT(pts(T.h?.total, HOUR), now - Math.max(span, DAY)); note = "Ainda juntando pontos de 10 em 10 minutos; por enquanto o gráfico usa as coletas de hora em hora."; } }
     else if (range === "1w") arr = thin(sinceT(fine("total"), now - span), 360);
     else if (range === "1m") arr = sinceT(pts(T.h?.total, HOUR), now - span);
     else arr = daily(T.d).filter((p) => p.x >= now - span);
@@ -350,7 +350,7 @@ function pageHome() {
   let range = store.get("sd-home-range", "1d"), metric = "total";
   const draw = () => {
     const { arr, note, fmt } = totalSeries(metric, range);
-    lineChart(document.getElementById("hc"), [{ pts: arr }], { fmt, gapMax: range === "1m" ? 3 : 4 });
+    lineChart(document.getElementById("hc"), [{ pts: arr }], { fmt, gapMax: 8 });
     const n = document.getElementById("hn"); n.hidden = !note; n.textContent = note;
     document.getElementById("hr").innerHTML = HOME_RANGES.map(([k, l]) => `<button type="button" data-r="${k}" class="${k === range ? "on" : ""}">${k === "live" ? '<span class="live"></span>' : ""}${l}</button>`).join("");
     document.querySelectorAll("#hr button").forEach((b) => b.addEventListener("click", () => { range = b.dataset.r; store.set("sd-home-range", range); draw(); }));
