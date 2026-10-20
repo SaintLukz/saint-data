@@ -1,9 +1,16 @@
-name: Coleta a cada 15 minutos
+name: Coleta
 
+# Disparada a cada 10 minutos pelo Worker "saint-data-agendador" na Cloudflare (workflow_dispatch).
+# O agendamento abaixo é só reserva: o cron do GitHub atrasa ou pula execuções com frequência.
 on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "auto, full (completa) ou fast (rápida)"
+        required: false
+        default: auto
   schedule:
-    - cron: "2,17,32,47 * * * *" # a cada 15 minutos
-  workflow_dispatch: {}
+    - cron: "23,53 * * * *"
 
 permissions:
   contents: write
@@ -15,14 +22,14 @@ concurrency:
 jobs:
   coletar:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Baixar dados anteriores (ramo dados)
         run: |
           if git ls-remote --exit-code --heads origin dados >/dev/null; then
-            git clone --depth 1 --branch dados "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" prev
+            git clone -q --depth 1 --branch dados "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" prev
           else
             mkdir -p prev
           fi
@@ -35,6 +42,7 @@ jobs:
         env:
           PREV: prev
           OUT: out
+          MODE: ${{ github.event.inputs.mode == 'full' && 'full' || '' }}
         run: node scripts/collect.mjs
 
       - name: Publicar no ramo dados (substitui a versão anterior)
