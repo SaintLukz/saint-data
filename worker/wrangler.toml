@@ -1,0 +1,17 @@
+# Worker que dispara a coleta do Saint Data no GitHub a cada 10 minutos.
+# O segredo GH_TOKEN (token do GitHub com permissão "Actions: Read and write" só no repo saint-data)
+# é cadastrado no painel da Cloudflare: Worker → Settings → Variables and Secrets.
+name = "saint-data-agendador"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[vars]
+REPO = "SaintLukz/saint-data"
+WORKFLOW = "coleta.yml"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[observability]
+enabled = true
