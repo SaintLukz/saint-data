@@ -145,6 +145,13 @@ async function main() {
   let total = await readJSON(join(PREV, "total.json"), null);
   if (total && total.h0 != null) total = { h: { total: oldH(total) }, d: total.d, f: {} }; // formato antigo
   total ??= { f: {}, h: {}, d: null };
+  // limpeza única: entre 20/10 18:25 e 21:55 (Brasília) jogos sumiram por falhas da API e o total ficou errado
+  if (state.cleaned !== 1) {
+    const a0 = Date.parse("2026-10-20T21:25:00Z"), a1 = Date.parse("2026-10-21T00:55:00Z");
+    for (const [k, ser] of Object.entries(total.f || {})) if (ser?.t0 != null) total.f[k] = { t0: ser.t0, v: ser.v.map((x, i) => (ser.t0 + i * STEP >= a0 && ser.t0 + i * STEP <= a1 ? null : x)) };
+    const h = total.h?.total; if (h?.t0 != null) total.h.total = { t0: h.t0, v: h.v.map((x, i) => (h.t0 + i * HOUR >= a0 - HOUR && h.t0 + i * HOUR <= a1 ? null : x)) };
+    state.cleaned = 1;
+  }
   const shards = new Map();
   for (let k = 0; k < SHARDS; k++) { const s = await readJSON(join(PREV, "l", `${k}.json`), null); for (const [id, v] of Object.entries(s?.games ?? {})) shards.set(Number(id), v); }
 
