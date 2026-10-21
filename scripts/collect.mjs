@@ -12,7 +12,7 @@
 //   g/<id>.json   histórico por hora (14 dias), visitas por hora, pico/média por dia (1 ano), descrição, fotos, passes, badges
 //   state.json, tracked.json  controle interno do coletor
 
-import { readFile, writeFile, mkdir, cp } from "node:fs/promises";
+import { readFile, writeFile, mkdir, cp, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -160,23 +160,50 @@ async function main() {
     for (const id of disc.searched) tracked[id] ??= today;
     const cutoff = new Date(T - TRACK_DAYS * DAY).toISOString().slice(0, 10);
     ids = Object.keys(tracked).filter((id) => tracked[id] >= cutoff).map(Number);
+    // recuperação única: jogos que sumiram por falhas antigas voltam a ser consultados
+    if (state.recovered !== 2 && existsSync(join(PREV, "g"))) { for (const f of await readdir(join(PREV, "g"))) { const id = f.replace(".json", ""); if (!tracked[id]) { tracked[id] = today; ids.push(Number(id)); } } state.recovered = 2; }
+    // nunca perder quem já estava no top
+    for (const g of prevGames.games) if (!tracked[g.id]) { tracked[g.id] = today; ids.push(g.id); }
   } else ids = prevGames.games.map((g) => g.id);
 
   // 2. jogadores, visitas, favoritos, datas
+  // lotes que falharem (limite de requisições do Roblox) são tentados de novo, mais devagar
   const details = new Map();
-  await pool(chunks(ids, 50), 4, async (b) => { const j = await getJSON(`https://games.roblox.com/v1/games?universeIds=${b.join(",")}`); for (const g of j?.data ?? []) details.set(g.id, g); });
-  if (details.size < Math.min(200, ids.length * 0.6)) throw new Error(`poucos dados (${details.size} de ${ids.length}); mantendo a versão anterior`);
+  let pending = chunks(ids, 50);
+  for (let round = 0; round < 4 && pending.length; round++) {
+    const failed = [];
+    await pool(pending, round ? 1 : 3, async (b) => {
+      const j = await getJSON(`https://games.roblox.com/v1/games?universeIds=${b.join(",")}`, round ? 3 : 2);
+      if (!j?.data) { failed.push(b); return; }
+      for (const g of j.data) details.set(g.id, g);
+      if (round) await sleep(1500);
+    });
+    if (failed.length) { console.log(`rodada ${round + 1}: ${failed.length} lotes falharam, tentando de novo`); await sleep(5000 * (round + 1)); }
+    pending = failed;
+  }
+  const missing = new Set(pending.flat());
+  if (details.size < Math.min(200, ids.length * 0.5)) throw new Error(`poucos dados (${details.size} de ${ids.length}); mantendo a versão anterior`);
+  // quem não respondeu continua com o último valor conhecido (sem ponto novo no gráfico)
+  let stale = 0;
+  for (const id of missing) {
+    const pm = prevMeta.get(id);
+    if (!pm || details.has(id)) continue;
+    details.set(id, { id, rootPlaceId: pm.place, name: pm.name, creator: { id: pm.creatorId, name: pm.creator, type: pm.creatorType, hasVerifiedBadge: pm.verified }, playing: pm.playing, visits: pm.visits, favoritedCount: pm.fav, genre_l1: pm.genre, genre_l2: pm.genre2, maxPlayers: pm.maxPlayers, created: pm.created, updated: pm.updated, stale: true });
+    stale++;
+  }
+  state.lastRun = { at: T, full, requested: ids.length, fetched: details.size - stale, stale, failedBatches: pending.length };
+  console.log(`detalhes: ${details.size - stale} de ${ids.length} (${stale} mantidos da coleta anterior)`);
   const ranked = [...details.values()].filter((g) => (g.playing ?? 0) > 0).sort((a, b) => b.playing - a.playing);
   const keep = ranked.slice(0, MAX_GAMES), keepIds = keep.map((g) => g.id);
   if (full) {
     const trackKeep = new Set(ranked.slice(0, TRACK_LIMIT).map((g) => String(g.id)));
-    for (const id of Object.keys(tracked)) if (!trackKeep.has(id) && !disc.found.has(Number(id))) delete tracked[id];
+    for (const id of Object.keys(tracked)) if (!trackKeep.has(id) && !disc.found.has(Number(id)) && !missing.has(Number(id))) delete tracked[id];
   }
 
   // 3. metadados (só na completa; na rápida reaproveita)
   const votes = new Map(), icons = new Map(), thumbs = new Map();
   if (full) {
-    await pool(chunks(keepIds, 100), 4, async (b) => {
+    await pool(chunks(keepIds, 100), 2, async (b) => {
       const j = await getJSON(`https://games.roblox.com/v1/games/votes?universeIds=${b.join(",")}`);
       for (const v of j?.data ?? []) votes.set(v.id, v);
     });
@@ -206,11 +233,11 @@ async function main() {
   const games = [];
   for (const g of keep) {
     const id = g.id, playing = g.playing ?? 0, visits = g.visits ?? 0, pm = prevMeta.get(id);
-    const fine = put(shards.get(id), slot, playing, FINE_SLOTS, STEP);
+    const fine = g.stale ? shards.get(id) ?? { t0: slot, v: [] } : put(shards.get(id), slot, playing, FINE_SLOTS, STEP);
     outShards[id % SHARDS][id] = fine;
     let gf = await readJSON(join(PREV, "g", `${id}.json`), {});
     if (gf.h0 != null) gf = { h: oldH(gf), d: gf.d }; // formato antigo
-    if (full) {
+    if (full && !g.stale) {
       const today24 = since(fine, Math.max(dayStart, T - HOUR - STEP), STEP);
       const hourAvg = today24.length ? today24.reduce((a, b) => a + b, 0) / today24.length : playing;
       gf.h = put(gf.h, hour, playing, GAME_HOURS, HOUR);
@@ -235,7 +262,7 @@ async function main() {
       up: v?.upVotes ?? pm?.up ?? 0, down: v?.downVotes ?? pm?.down ?? 0,
       genre: g.genre_l1 || meta?.genre || pm?.genre || g.genre || "", genre2: g.genre_l2 || "",
       maxPlayers: g.maxPlayers ?? null, created: g.created, updated: g.updated, maturity: meta?.maturity ?? pm?.maturity ?? "",
-      blurb: Array.from((g.description ?? "").split("\n").find((l) => l.trim()) ?? "").slice(0, 120).join(""),
+      blurb: g.stale ? pm?.blurb ?? "" : Array.from((g.description ?? "").split("\n").find((l) => l.trim()) ?? "").slice(0, 120).join(""),
       icon: icons.get(id) ?? pm?.icon ?? null, thumbs: thumbs.get(id) ?? pm?.thumbs ?? [],
       lists, listsPrev: full ? pm?.lists ?? {} : pm?.listsPrev ?? {},
       listPeak: Object.fromEntries(Object.entries(lists).map(([s, r]) => [s, Math.min(r, pm?.listPeak?.[s] ?? r)])),
@@ -247,7 +274,7 @@ async function main() {
       dailyVisits, avgVisitMin: dailyVisits > 0 ? Math.round((avg24 * 1440) / dailyVisits) : pm?.avgVisitMin ?? null,
       hasExtras: pm?.hasExtras || false, spark: sp,
     });
-    if (full) await writeFile(join(OUT, "g", `${id}.json`), JSON.stringify(gf));
+    if (full && !g.stale) await writeFile(join(OUT, "g", `${id}.json`), JSON.stringify(gf));
   }
 
   // 5. diária: game passes e badges dos maiores
