@@ -91,10 +91,11 @@ async function prevCatalog() {
 // ---------- métricas de um mapa (últimas ~25h, por hora) ----------
 const vals = (a) => (a || []).map((x) => x?.value ?? null);
 const sum = (a) => a.reduce((s, x) => s + (x ?? 0), 0);
-// pico de cada janela de 24h, da mais antiga para a mais nova (as últimas 168 horas viram 7 janelas)
+// média de jogadores de cada janela de 24h, da mais antiga para a mais nova (as últimas 168 horas viram 7 janelas).
+// Média e não pico: a Epic às vezes manda uma hora com um valor absurdo, e o pico do dia ficaria errado.
 function dayPeaks(ccu) {
   const out = [];
-  for (let end = ccu.length; end > 0 && out.length < 7; end -= 24) { const w = ccu.slice(Math.max(0, end - 24), end).filter((x) => x != null); out.unshift(w.length ? Math.max(...w) : null); }
+  for (let end = ccu.length; end > 0 && out.length < 7; end -= 24) { const w = ccu.slice(Math.max(0, end - 24), end).filter((x) => x != null); out.unshift(w.length >= 6 ? Math.round(w.reduce((a, b) => a + b, 0) / w.length) : null); }
   return out;
 }
 const grow = (a, b) => (a != null && b != null && b >= 5 ? a / b - 1 : null);
@@ -103,7 +104,9 @@ function summarize(j) {
   const lastIdx = (() => { for (let i = ccu.length - 1; i >= Math.max(0, ccu.length - 3); i--) if (ccu[i] != null) return i; return -1; })();
   const now = lastIdx >= 0 ? ccu[lastIdx] : 0;
   const last24 = (a) => vals(a).slice(-24);
-  const peak24 = Math.max(0, ...ccu.slice(-24).filter((x) => x != null));
+  const l24 = ccu.slice(-24).filter((x) => x != null).sort((a, b) => a - b);
+  const med = l24.length ? l24[Math.floor(l24.length / 2)] : 0;
+  const peak24 = Math.max(0, ...l24.filter((x) => x <= Math.max(med * 4, 50)));
   const first = ccu.find((x) => x != null);
   const ago = ccu.length >= 25 ? ccu[ccu.length - 25] : null;
   const min24 = sum(last24(j.minutesPlayed)), uniq24 = sum(last24(j.uniquePlayers));
