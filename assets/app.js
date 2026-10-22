@@ -788,7 +788,10 @@ function pageAbout() {
     <p>O Saint Data coleta dados públicos do Roblox <b>a cada 10 minutos</b>: jogadores, visitas e favoritos dos ${nfInt.format(S.data.games.length)} jogos com mais gente jogando. A cada hora, faz uma coleta completa que procura jogos novos (nas listas oficiais de vários países e dispositivos e na busca do Roblox) e atualiza rankings, votos, ícones e imagens. Uma vez por dia, busca os passes e badges dos 300 maiores.</p>
     <p>Última coleta: <b>${dhfmt.format(new Date(S.data.t))}</b> (${ago(S.data.t)}). Histórico: ${n} ${n === 1 ? "dia" : "dias"}${T.d?.dates?.[0] ? ` desde ${dyfmt.format(new Date(T.d.dates[0] + "T15:00:00Z"))}` : ""}.</p>
     <p>O número grande da Visão geral soma só os jogos acompanhados, não o Roblox inteiro. As variações de 1h, 24h e 7d comparam com a coleta mais próxima daquele horário. Visitas por dia, horas jogadas e tempo médio de visita são estimativas feitas a partir das coletas.</p>
-    <p>Recordes valem a partir de 18 de outubro de 2026, quando o Saint Data começou a acompanhar.</p></div></div>`;
+    <p>Recordes valem a partir de 18 de outubro de 2026, quando o Saint Data começou a acompanhar.</p>
+    <h2>Fortnite (Minerador)</h2>
+    <p>Os dados do Fortnite vêm da <b>API pública e oficial da Epic</b> (Fortnite Data API). De hora em hora, o Saint Data baixa o catálogo inteiro de mapas públicos (nome, criador e tags), procura os mapas com o mesmo nome dos jogos do top do Roblox e mede jogadores, partidas, minutos e retenção dos mapas que importam: os do topo de cada gênero, as cópias de jogos do Roblox e os mapas novos. Os gráficos de cada mapa vêm ao vivo da Epic.</p>
+    <p>“Mesmo nome” compara as palavras principais do nome, sem emojis, colchetes e palavras como UPD, NEW ou BETA. Dá para corrigir: em “Lado a lado”, marque “não é o mesmo jogo” ou vincule outro mapa pelo código. Suas ideias, ignorados e ajustes ficam salvos neste navegador (há exportar/importar em Ideias). A API da Epic não tem imagens dos mapas, por isso as capas do Fortnite são geradas.</p></div></div>`;
 }
 function notFound(t, msg = "") { $view.innerHTML = `<div class="page wide fade"><div class="col soon"><h1>${t}</h1><p>${msg}</p><p><a class="pill-btn" href="#/">Voltar ao início</a></p></div></div>`; }
 

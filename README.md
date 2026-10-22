@@ -1,6 +1,6 @@
 # Saint Data
 
-Painel dos jogos do Roblox: jogadores, tendências, estúdios e gêneros, com até 3000 jogos e coleta de hora em hora.
+Painel dos jogos do Roblox (3000 jogos, coleta a cada 10 minutos) com um Minerador que compara cada jogo com os mapas do Fortnite que têm o mesmo nome.
 
 ## Como funciona
 
@@ -14,3 +14,8 @@ Painel dos jogos do Roblox: jogadores, tendências, estúdios e gêneros, com at
 - `total.json`: soma dos jogadores, por hora (30 dias) e pico/média por dia (2 anos).
 - `g/<id>.json`: histórico de cada jogo, por hora (14 dias) e pico por dia (1 ano).
 - `tracked.json`: jogos acompanhados entre execuções.
+
+## Fortnite (Minerador)
+
+- `scripts/fortnite.mjs` usa a API pública da Epic (`https://api.fortnite.com/ecosystem/v1`, sem login): catálogo completo de mapas, rankings por gênero e métricas por mapa.
+- `.github/workflows/fortnite.yml` roda de hora em hora (disparado pelo Worker nos primeiros 10 minutos de cada hora) e grava no ramo `dados-fn`: `top.json`, `match.json` (jogo do Roblox → mapas com o mesmo nome), `tokens.json`, `new.json`, `copies.json`, `total.json` e `catalog.txt`.
