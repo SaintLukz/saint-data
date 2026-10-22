@@ -255,7 +255,7 @@ function lineChart(box, series, { fmt = K, h = 250, peak = true, live = true, ga
     const vals = series.map((s) => { let b = null; for (const p of s.pts) if (p.y != null && (!b || Math.abs(p.x - best.x) < Math.abs(b.x - best.x))) b = p; return b && Math.abs(b.x - best.x) < tol ? b : null; });
     dots.forEach((c, i) => { const p = vals[i]; c.style.opacity = p ? 1 : 0; if (p) { c.setAttribute("cx", X(p.x)); c.setAttribute("cy", Y(p.y)); } });
     if (one && onHover) { tip.innerHTML = ""; onHover({ ...best, label: when(best), isLast: best === last }); }
-    else place(best, one ? `${esc(fmt(best.y))}<span>${when(best)}</span>` : `${when(best)} ${series.map((s, i) => (vals[i] ? `<span style="color:${s.color}">● ${esc(fmt(vals[i].y))}</span>` : "")).join("")}`);
+    else place(best, one ? `${esc(fmt(best.o ?? best.y))}<span>${when(best)}</span>` : `${when(best)} ${series.map((s, i) => (vals[i] ? `<span style="color:${s.color}">● ${esc(fmt(vals[i].o ?? vals[i].y))}</span>` : "")).join("")}`);
   };
   svg.addEventListener("pointermove", (e) => move(e.clientX));
   svg.addEventListener("pointerdown", (e) => move(e.clientX));
@@ -402,6 +402,7 @@ function pageHome() {
       <p class="note" id="hn" hidden></p>
     </section>
     <div class="grid2">
+      ${card("Oportunidades pro Fortnite", "livres no Fortnite", "#/minerar", '<div class="rows" id="hmine"><p class="empty">Carregando…</p></div>')}
       ${card("Disparando", boLabel, "#/jogos/subindo", `<div class="rows">${bo.slice(0, 5).map((g) => rowGame(g, `${age(g.created)} · ${esc(genre(g.genre))}`, `${chg(boLabel ? g.d1h : g.d1)}<small>${K(g.playing)} agora</small>`)).join("") || empty("Ninguém disparou nas últimas 24h.")}</div>`)}
       ${card("Novos recordes", "", "#/jogos/recordes", `<div class="rows">${highs.slice(0, 5).map((g) => rowGame(g, esc(genre(g.genre)), `${K(g.playing)}${chg(g.d1 ?? g.d1h)}`)).join("") || empty("Nenhum jogo bateu recorde hoje (ainda).")}</div>`)}
       ${card("Top jogos", "", "#/jogos", `<div class="rows">${G.slice(0, 5).map((g, i) => rowRank(i + 1, g, esc(g.creator), `${K(g.playing)}${chg(g.d1 ?? g.d1h)}`)).join("")}</div>`)}
@@ -422,6 +423,7 @@ function pageHome() {
     dropdown(document.getElementById("hm"), METRICS, metric, (k) => { metric = k; draw(); });
   };
   draw();
+  homeMineCard();
 }
 
 // seta + diferença + porcentagem (a mesma peça do número grande)
@@ -531,6 +533,8 @@ function pageWord(w) {
   if (!x) return notFound("Tendência não encontrada");
   frame("tendencias", `<div class="page-h"><a class="pill-btn icon" href="#/tendencias" aria-label="Voltar">${I.back}</a>${stack(x.games)}<div><h1>“${esc(x.label)}”</h1><p>${nfInt.format(x.games.length)} jogos no top · ${nfInt.format(x.newCount)} novos em 30 dias · ${K(x.playing)} jogando</p></div></div><div id="gt"></div>`, { rail: false, wide: true });
   tableWithMore(document.getElementById("gt"), x.games, { extra: { t: "Idade", f: (g) => age(g.created) } });
+  document.getElementById("gt").insertAdjacentHTML("afterend", '<div id="fnword"></div>');
+  wordFnBox(w);
 }
 
 /* =========================================================== Rankings (listas oficiais do Roblox) */
@@ -673,7 +677,7 @@ function pageGame(id) {
       const nowH = (new Date().getUTCHours() + 21) % 24, amax = Math.max(...avgH.filter((x) => x != null), 1);
       const passes = (gf?.passes || []).slice().sort((a, b) => a.price - b.price);
       const thumbs = gf?.thumbs || g.thumbs || [];
-      return `
+      return `<div id="fnbox"></div>
         <div class="sec"><div class="sec-h"><h2>Números-chave</h2><button class="see" type="button" data-hist>Histórico</button></div>
           <div class="kv"><span>${I.clock}Tempo médio de visita</span><b>${g.avgVisitMin ? `${nfInt.format(g.avgVisitMin)} min` : "—"}</b></div>
           <div class="kv"><span>${I.starO}Favoritos</span><b>${K(g.fav)}</b></div>
@@ -707,6 +711,7 @@ function pageGame(id) {
   let cur = "ov";
   const show = (k) => {
     cur = k; document.getElementById("gp").innerHTML = tabs[k]();
+    if (k === "ov") gameFnBox(g);
     $view.querySelectorAll("[data-pt]").forEach((b) => b.classList.toggle("on", b.dataset.pt === k));
     slide($view.querySelector(".ptabs"), "button.on", "ptabs");
     $view.querySelector("[data-hist]")?.addEventListener("click", () => { range = "all"; metric = "ccu"; draw(); document.getElementById("gh").scrollIntoView({ behavior: "smooth" }); });
@@ -787,9 +792,515 @@ function pageAbout() {
 }
 function notFound(t, msg = "") { $view.innerHTML = `<div class="page wide fade"><div class="col soon"><h1>${t}</h1><p>${msg}</p><p><a class="pill-btn" href="#/">Voltar ao início</a></p></div></div>`; }
 
+/* =========================================================== Fortnite · Minerador */
+// Dados do Fortnite: coletados de hora em hora (ramo dados-fn) a partir da API pública da Epic.
+// Gráficos dos mapas vêm ao vivo da própria API da Epic (aceita chamadas do navegador).
+const FN_BASE = window.SD_FN || "https://raw.githubusercontent.com/SaintLukz/saint-data/dados-fn/";
+const EPIC = window.SD_EPIC || "https://api.fortnite.com/ecosystem/v1";
+const FN = { top: null, match: null, tokens: null, copies: null, news: null, total: null, byCode: new Map(), at: 0, p: null };
+const FN_COLORS = ["#7c3aed", "#0ea5e9", "#db2777"], RBX_COLOR = "#e2621b";
+function loadFN(force = false) {
+  if (FN.p && !force) return FN.p;
+  if (FN.p && force && Date.now() - FN.at < 5 * MIN) return FN.p;
+  FN.p = Promise.all(["top.json", "match.json", "tokens.json", "copies.json", "new.json", "total.json"].map((u) => fetch(FN_BASE + u, { cache: "no-cache" }).then((r) => (r.ok ? r.json() : null)).catch(() => null)))
+    .then(([top, match, tokens, copies, news, total]) => {
+      if (!top && !FN.top) throw new Error("sem dados do Fortnite");
+      Object.assign(FN, { top: top || FN.top, match: match || FN.match, tokens: tokens || FN.tokens, copies: copies || FN.copies, news: news || FN.news, total: total || FN.total, at: Date.now() });
+      FN.byCode = new Map();
+      for (const x of [...(FN.news?.islands || []), ...(FN.top?.islands || [])]) FN.byCode.set(x.code, x);
+      return FN;
+    });
+  FN.p.catch(() => { FN.p = null; });
+  return FN.p;
+}
+// desenha a página quando os dados do Fortnite estiverem prontos (e de novo se chegarem dados mais novos)
+function withFN(render) {
+  const h = location.hash;
+  const fresh = FN.top && Date.now() - FN.at < 10 * MIN;
+  if (FN.top) render();
+  else $view.innerHTML = `<div class="page wide fade">${minerTabs(minerOn())}<div class="col"><div class="chart-empty loading" style="height:280px"><span>Carregando os dados do Fortnite…</span></div></div></div>`;
+  if (fresh) return;
+  const had = !!FN.top;
+  loadFN(true).then(() => { if (location.hash !== h) return; const y = scrollY; render(); if (had) { $view.querySelector(".page")?.classList.remove("fade"); } afterRender(); scrollTo(0, y); })
+    .catch(() => { if (location.hash === h && !FN.top) $view.innerHTML = `<div class="page wide fade">${minerTabs(minerOn())}<div class="col soon"><h1>Os dados do Fortnite ainda não chegaram</h1><p>O coletor do Fortnite roda de hora em hora. Na primeira vez ele leva uns 15 minutos para montar tudo. Recarregue a página daqui a pouco.</p></div></div>`; });
+}
+const epicCache = new Map();
+function epic(path) {
+  const hit = epicCache.get(path);
+  if (hit && Date.now() - hit.at < 5 * MIN) return hit.p;
+  const p = fetch(EPIC + path).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  epicCache.set(path, { p, at: Date.now() });
+  return p;
+}
+const epicPts = (arr) => (arr || []).map((x) => ({ x: new Date(x.timestamp).getTime(), y: x.value }));
+const epicRange = (ms) => `from=${new Date(Date.now() - ms + MIN).toISOString()}&to=${new Date().toISOString()}`;
+async function fnSeries(code, range, key = "peakCCU") {
+  if (range === "1d") { const j = await epic(`/islands/${code}/metrics/minute?${epicRange(DAY)}`); return epicPts(j?.[key]); }
+  if (range === "dia") { const j = await epic(`/islands/${code}/metrics/day?${epicRange(7 * DAY)}`); return epicPts(j?.[key]).map((p) => ({ ...p, x: p.x + 12 * HOUR, day: true })); }
+  const j = await epic(`/islands/${code}/metrics/hour?${epicRange(7 * DAY)}`); return epicPts(j?.[key]);
+}
+const isCode = (s) => /^\d{4}-\d{4}-\d{4}$/.test(String(s).trim());
+const fnl = (code) => `#/mapa/${code}`;
+const fnPlay = (x) => `https://www.fortnite.com/@${encodeURIComponent(x.creator || "epic")}/${x.code}`;
+// capa gerada (a API da Epic não tem imagens dos mapas)
+function fnTile(x, cls = "ic") {
+  let h = 0; for (const ch of x?.code || x?.title || "?") h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const a = h % 360, b = (a + 40 + (h >> 9) % 80) % 360;
+  const L = esc(((x?.title || "?").match(/[\p{L}\p{N}]/u) || ["?"])[0].toUpperCase());
+  return `<span class="${cls} fni" style="background:linear-gradient(135deg,hsl(${a} 70% 55%),hsl(${b} 75% 40%))" aria-hidden="true">${L}</span>`;
+}
+const fnSub = (x) => [x.creator, x.genres?.[0] ? FN_GENRES[x.genres[0].g] ?? x.genres[0].g : (x.tags || [])[0]].filter(Boolean).map(esc).join(" · ");
+const FN_GENRES = { survival: "Sobrevivência", strategy: "Estratégia", "sports-racing": "Esportes e Corrida", "simulation-tycoon": "Simulação e Tycoon", shooter: "Tiro", "roleplaying-social": "Roleplay e Social", roguelike: "Roguelike", "party-mini-games": "Festa e Minigames", "music-rhythm": "Música e Ritmo", horror: "Terror", "deathrun-platformer": "Deathrun e Plataforma", "battle-royale": "Battle Royale", "adventure-rpg": "Aventura e RPG" };
+
+// preferências do minerador (ficam neste navegador)
+const prefSet = (k) => new Set(store.get(k, []));
+function toggleSet(k, id) { const s = prefSet(k); s.has(id) ? s.delete(id) : s.add(id); store.set(k, [...s]); return s.has(id); }
+const ideas = () => store.get("sd-ideas", {});
+function setIdea(g, patch) {
+  const all = ideas(), cur = all[g.id];
+  if (patch === null) delete all[g.id];
+  else all[g.id] = { status: "ideia", note: "", code: "", at: new Date().toISOString(), ...cur, ...patch, name: g.name, icon: g.icon || cur?.icon || "", created: g.created };
+  store.set("sd-ideas", all);
+}
+const IDEA_ST = [["ideia", "Ideia"], ["fazendo", "Fazendo"], ["publicado", "Publicado"]];
+
+// o que existe no Fortnite para um jogo do Roblox (com os ajustes manuais)
+function fnFor(g) {
+  const m = FN.match?.games?.[g.id];
+  const un = new Set(store.get("sd-fn-unlink", {})[g.id] || []);
+  const man = (store.get("sd-fn-link", {})[g.id] || []).map((x) => ({ ...x, score: 1, manual: true, now: FN.byCode.get(x.code)?.now ?? x.now ?? null }));
+  const best = (m?.best || []).filter((b) => !un.has(b[0]) && !man.some((x) => x.code === b[0])).map(([code, title, creator, score, now, peak24, firstSeen]) => ({ code, title, creator, score, now: FN.byCode.get(code)?.now ?? now, peak24, firstSeen }));
+  const all = [...man, ...best];
+  const same = all.filter((b) => b.score >= 0.6);
+  const sameN = Math.max(same.length, (m?.same ?? same.length) - [...un].length + man.length);
+  const bestNow = same.reduce((mx, b) => Math.max(mx, b.now ?? 0), 0);
+  return { m, all, same, sameN: Math.max(0, sameN), bestNow, generic: !!m?.generic, known: !!m || man.length > 0, unchecked: m?.unchecked ?? 0, firstNew: m?.firstNew ?? null };
+}
+const HIDE_MODES = [["any", "Qualquer cópia"], ["100", "Cópia com 100+ jogando"], ["1000", "Cópia com 1K+ jogando"]];
+function existsFN(f, mode) {
+  if (mode === "off" || f.generic) return false;
+  if (mode === "any") return f.sameN > 0;
+  return f.bestNow >= Number(mode);
+}
+// nota de 0 a 100: tamanho no Roblox × crescimento × novidade × espaço livre no Fortnite
+function opportunity(g, f = fnFor(g)) {
+  const size = Math.min(1, Math.max(0, (Math.log10(Math.max(g.playing, 100)) - 2) / 3));
+  const gr = g.d1 ?? g.d1h ?? 0;
+  const grow = 1 + Math.max(-0.5, Math.min(2, gr)) * 0.5;
+  const a = ageDays(g.created), fresh = a <= 7 ? 1.3 : a <= 30 ? 1.15 : a <= 90 ? 1.05 : 1;
+  let gap = 1;
+  if (f.generic) gap = 0.6;
+  else if (f.sameN > 0) { const b = f.bestNow; gap = b >= 10000 ? 0.08 : b >= 1000 ? 0.2 : b >= 100 ? 0.45 : b >= 10 ? 0.7 : 0.85; }
+  return Math.round(100 * Math.min(1, (size * grow * fresh * gap) / 1.3));
+}
+const oppBar = (s) => `<span class="opp ${s >= 70 ? "hi" : s >= 40 ? "md" : ""}"><i style="width:${s}%"></i></span><b class="oppn">${s}</b>`;
+function fnBadge(f, { long = false } = {}) {
+  if (!f.known) return '<span class="chip">Sem dados</span>';
+  if (f.generic) return `<span class="chip" title="Nome comum demais para comparar pelo nome">Nome genérico</span>${long ? "<small>compare pelo gancho</small>" : ""}`;
+  if (!f.sameN) return `<span class="chip up">Livre no Fortnite</span>${f.all.length ? `<small>${nfInt.format(f.all.length)} com nome parecido</small>` : long ? "<small>nenhum mapa com esse nome</small>" : ""}`;
+  const cls = f.bestNow >= 1000 ? "down" : f.bestNow >= 100 ? "warn" : "";
+  return `<span class="chip ${cls}">${nfInt.format(f.sameN)} ${f.sameN === 1 ? "cópia" : "cópias"}</span><small>${f.bestNow ? `maior com ${K(f.bestNow)} jogando` : "nenhuma com jogadores"}</small>`;
+}
+const MINER_TABS = [["minerar", "Minerar", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5C6 4.5 10.5 3.2 15 4.5 12 4.8 9 6.3 6.8 8.8"/><path d="m9.6 6.9 6.9 9.6"/></svg>'], ["copias", "Cópias recentes", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6.5" y="6.5" width="10" height="10" rx="2"/><path d="M13.5 6.5V5A1.5 1.5 0 0 0 12 3.5H5A1.5 1.5 0 0 0 3.5 5v7A1.5 1.5 0 0 0 5 13.5h1.5"/></svg>'], ["ganchos", "Ganchos", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v7.5a4 4 0 0 1-8 0V9"/><path d="m2.5 10.5 1.5-1.5 1.5 1.5"/><circle cx="12" cy="3" r="0.4"/></svg>'], ["fortnite", "Top Fortnite", TAB_ICONS.rankings], ["novos", "Novos no Fortnite", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 3v3M10 14v3M3 10h3M14 10h3M5 5l2 2M13 13l2 2M5 15l2-2M13 7l2-2"/></svg>'], ["ideias", "Ideias", I.starO]];
+const MINER_HREF = { minerar: "#/minerar", copias: "#/minerar/copias", ganchos: "#/minerar/ganchos", fortnite: "#/fortnite", novos: "#/fortnite/novos", ideias: "#/minerar/ideias" };
+function minerOn() { const [a, b] = location.hash.replace(/^#\/?/, "").split("/"); if (a === "fortnite") return b === "novos" ? "novos" : "fortnite"; if (a === "minerar") return ["copias", "ganchos", "ideias"].includes(b) ? b : "minerar"; return ""; }
+const minerTabs = (on) => `<nav class="tabs" aria-label="Minerador">${MINER_TABS.map(([k, l, ic]) => `<a href="${MINER_HREF[k]}" class="${k === on ? "on" : ""}">${ic}${l}</a>`).join("")}</nav>`;
+function fnFrame(on, html, { rail = "" } = {}) {
+  $view.innerHTML = `<div class="page${rail ? "" : " wide"} fade">${minerTabs(on)}<div class="col">${html}</div>${rail ? `<aside class="rail">${rail}</aside>` : ""}</div>`;
+}
+const stamp = () => (FN.top?.t ? `Fortnite atualizado ${ago(FN.top.t)}` : "");
+
+/* ---------- Minerar ---------- */
+const MINE_SRC = [["", "Todos"], ["disparando", "Disparando"], ["novos", "Novos (30 dias)"], ["recordes", "Recordes de hoje"], ["top", "Top 300"]];
+const MINE_SORT = [["opp", "Oportunidade"], ["playing", "Jogadores"], ["d1", "Crescimento 24h"], ["age", "Mais novos"]];
+const MINE_MIN = [["0", "Qualquer tamanho"], ["500", "500+ jogando"], ["1000", "1K+ jogando"], ["5000", "5K+ jogando"], ["20000", "20K+ jogando"]];
+const MINE_AGE = [["", "Qualquer idade"], ["7", "Até 7 dias"], ["30", "Até 30 dias"], ["90", "Até 90 dias"], ["365", "Até 1 ano"]];
+const MINE_DEF = { src: "", hide: "any", min: "1000", sort: "opp", age: "", genre: "", ign: true, done: true, q: "" };
+function pageMine(tab = "") {
+  if (tab === "copias") return pageCopies();
+  if (tab === "ganchos") return pageHooks();
+  if (tab === "ideias") return pageIdeas();
+  withFN(() => {
+    const P = { ...MINE_DEF, ...store.get("sd-mine", {}) };
+    const savePrefs = () => store.set("sd-mine", P);
+    fnFrame("minerar", `
+      <div class="page-h"><div><h1>Minerador</h1><p>Jogos do Roblox que estão em alta, lado a lado com o que já existe no Fortnite. ${stamp()}</p></div></div>
+      <div class="mine-bar">
+        <div class="seg" id="msrc">${MINE_SRC.map(([k, l]) => `<button type="button" data-k="${k}" class="${k === P.src ? "on" : ""}">${l}</button>`).join("")}</div>
+        <div class="mine-f">
+          <button type="button" class="tgl ${P.hide !== "off" ? "on" : ""}" id="mhide-t"><span class="sw"></span>Esconder o que já existe no Fortnite</button>
+          <div class="dd" id="mhide"></div><div class="dd" id="mmin"></div><div class="dd" id="mage"></div><div class="dd" id="mgen"></div><div class="dd" id="msort"></div>
+          <button type="button" class="tgl sm ${P.ign ? "on" : ""}" id="mign"><span class="sw"></span>Esconder ignorados</button>
+          <button type="button" class="tgl sm ${P.done ? "on" : ""}" id="mdone"><span class="sw"></span>Esconder os que já fiz</button>
+          <label class="searchbox">${I.search}<input id="mq" type="search" placeholder="Filtrar por nome" value="${esc(P.q)}" aria-label="Filtrar por nome"></label>
+        </div>
+      </div>
+      <p class="note" id="msum"></p>
+      <div id="mt"></div>`);
+    let limit = 100;
+    const draw = () => {
+      const ign = prefSet("sd-fn-ign"), done = prefSet("sd-fn-done"), ids = ideas();
+      const bo = () => { const a = breakingOut(); return a.length >= 20 ? a : a.concat(breakingOutFallback().filter((g) => g.d1h >= 0.1 && !a.includes(g))); };
+      let list = P.src === "disparando" ? bo() : P.src === "novos" ? S.data.games.filter((g) => ageDays(g.created) <= 30) : P.src === "recordes" ? newHighs() : P.src === "top" ? S.data.games.slice(0, 300) : S.data.games.slice();
+      const q = P.q.trim().toLowerCase();
+      let hidFN = 0, hidIgn = 0, hidDone = 0;
+      const rows = [];
+      for (const g of list) {
+        if (g.playing < Number(P.min)) continue;
+        if (P.age && ageDays(g.created) > Number(P.age)) continue;
+        if (P.genre && g.genre !== P.genre) continue;
+        if (q && !g.name.toLowerCase().includes(q)) continue;
+        if (P.ign && ign.has(g.id)) { hidIgn++; continue; }
+        if (P.done && done.has(g.id)) { hidDone++; continue; }
+        const f = fnFor(g);
+        if (existsFN(f, P.hide)) { hidFN++; continue; }
+        rows.push({ g, f, s: opportunity(g, f) });
+      }
+      const sorts = { opp: (a, b) => b.s - a.s || b.g.playing - a.g.playing, playing: (a, b) => b.g.playing - a.g.playing, d1: (a, b) => (b.g.d1 ?? b.g.d1h ?? -9) - (a.g.d1 ?? a.g.d1h ?? -9), age: (a, b) => new Date(b.g.created) - new Date(a.g.created) };
+      rows.sort(sorts[P.sort] || sorts.opp);
+      document.getElementById("msum").innerHTML = `${nfInt.format(rows.length)} jogos${hidFN ? ` · <b>${nfInt.format(hidFN)}</b> escondidos porque já existem no Fortnite` : ""}${hidIgn ? ` · ${nfInt.format(hidIgn)} ignorados` : ""}${hidDone ? ` · ${nfInt.format(hidDone)} que você já fez` : ""}`;
+      const act = (g, k, on, label, ic) => `<button type="button" class="act ${on ? "on" : ""}" data-act="${k}" data-id="${g.id}" title="${label}" aria-label="${label}">${ic}</button>`;
+      document.getElementById("mt").innerHTML = `<div class="tbl-wrap"><table class="tbl mine"><thead><tr><th class="l">Oport.</th><th class="l">Jogo do Roblox</th><th>Jogadores</th><th>24h</th><th>7d</th><th class="l">No Fortnite</th><th></th></tr></thead><tbody>
+        ${rows.slice(0, limit).map(({ g, f, s }) => `<tr data-href="#/lado/${g.id}"><td class="l oppc">${oppBar(s)}</td><td class="l"><a class="gname" href="#/lado/${g.id}">${icon(g)}<span><b>${esc(g.name)}</b><small>${age(g.created)} · ${esc(genre(g.genre))}${ids[g.id] ? ` · <span class="chip new">${IDEA_ST.find((x) => x[0] === ids[g.id].status)?.[1]}</span>` : ""}</small></span></a></td><td class="pl">${K(g.playing)}</td><td>${chg(g.d1 ?? g.d1h)}</td><td>${chg(g.d7)}</td><td class="l fnc">${fnBadge(f)}</td><td class="acts">${act(g, "idea", !!ids[g.id], "Salvar ideia", I.star(!!ids[g.id]))}${act(g, "done", done.has(g.id), "Já fiz no Fortnite", '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 10.5 3.5 3.5 7.5-8"/></svg>')}${act(g, "ign", ign.has(g.id), "Ignorar", '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg>')}</td></tr>`).join("") || `<tr><td colspan="7" class="l muted" style="padding:22px">Nenhum jogo com esses filtros. Tente outra fonte ou mostre também os que já existem no Fortnite.</td></tr>`}
+        </tbody></table></div>${rows.length > limit ? `<button class="more-btn" type="button" id="mmore">Mostrar mais (${nfInt.format(rows.length - limit)})</button>` : ""}`;
+      wireRows(document.getElementById("mt"));
+      document.getElementById("mmore")?.addEventListener("click", () => { limit += 150; draw(); });
+    };
+    const pick = (id, opts, key) => dropdown(document.getElementById(id), opts, P[key], (k) => { P[key] = k; savePrefs(); pick(id, opts, key); draw(); });
+    const pickHide = () => { const el = document.getElementById("mhide"); el.classList.toggle("off", P.hide === "off"); dropdown(el, HIDE_MODES, P.hide === "off" ? P.lastHide || "any" : P.hide, (k) => { P.hide = k; P.lastHide = k; savePrefs(); document.getElementById("mhide-t").classList.add("on"); pickHide(); draw(); }); };
+    pickHide();
+    pick("mmin", MINE_MIN, "min"); pick("mage", MINE_AGE, "age"); pick("msort", MINE_SORT, "sort");
+    pick("mgen", [["", "Todos os gêneros"], ...S.genres.map((x) => [x.key, genre(x.key)])], "genre");
+    document.getElementById("mhide-t").addEventListener("click", (e) => { if (P.hide === "off") P.hide = P.lastHide || "any"; else { P.lastHide = P.hide; P.hide = "off"; } savePrefs(); e.currentTarget.classList.toggle("on", P.hide !== "off"); pickHide(); draw(); });
+    for (const [id, key] of [["mign", "ign"], ["mdone", "done"]]) document.getElementById(id).addEventListener("click", (e) => { P[key] = !P[key]; savePrefs(); e.currentTarget.classList.toggle("on", P[key]); draw(); });
+    document.querySelectorAll("#msrc button").forEach((b) => b.addEventListener("click", () => { P.src = b.dataset.k; savePrefs(); document.querySelectorAll("#msrc button").forEach((x) => x.classList.toggle("on", x === b)); slide(document.getElementById("msrc")); limit = 100; draw(); }));
+    let qt; document.getElementById("mq").addEventListener("input", (e) => { clearTimeout(qt); qt = setTimeout(() => { P.q = e.target.value; savePrefs(); draw(); }, 150); });
+    document.getElementById("mt").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-act]"); if (!b) return;
+      e.stopPropagation();
+      const g = S.byId.get(Number(b.dataset.id)); if (!g) return;
+      if (b.dataset.act === "idea") { const had = !!ideas()[g.id]; setIdea(g, had ? null : {}); toast(had ? "Ideia removida" : "Salvo em Ideias"); }
+      if (b.dataset.act === "done") toast(toggleSet("sd-fn-done", g.id) ? "Marcado como já feito" : "Desmarcado");
+      if (b.dataset.act === "ign") toast(toggleSet("sd-fn-ign", g.id) ? "Ignorado (fica escondido)" : "Não está mais ignorado");
+      draw();
+    });
+    draw();
+    slide(document.getElementById("msrc"));
+  });
+}
+
+/* ---------- Lado a lado: jogo do Roblox × mapas do Fortnite ---------- */
+function pageSide(rid) {
+  const g = S.byId.get(Number(rid));
+  if (!g) return notFound("Jogo não encontrado", "Este jogo saiu do top do Roblox ou o link está errado.");
+  withFN(() => {
+    const f = fnFor(g), idea = ideas()[g.id];
+    const lead = f.same[0] || f.all[0] || null;
+    const label = (s) => (s >= 0.85 ? "Mesmo nome" : s >= 0.6 ? "Quase igual" : "Parecido");
+    const after = (iso) => iso && FN.top?.baseline && iso > FN.top.baseline;
+    fnFrame("minerar", `
+      <div class="page-h"><a class="pill-btn icon" href="#/minerar" aria-label="Voltar">${I.back}</a><div><h1>Roblox × Fortnite</h1><p>${esc(g.name)} e o que já existe com esse nome no Fortnite.</p></div></div>
+      <div class="vs">
+        <div class="card vs-c"><div class="vs-h">${icon(g, "ic lg")}<div><span class="chip rbx">Roblox</span><h2><a href="${gl(g)}">${esc(g.name)}</a></h2><small>${esc(g.creator)} · ${age(g.created)} · ${esc(genre(g.genre))}</small></div></div>
+          <div class="vs-n"><b>${K(g.playing)}</b><span>jogando agora</span>${chg(g.d1 ?? g.d1h)}</div>
+          <div class="vs-k"><span>Pico</span><b>${K(g.peak)}</b><span>Visitas</span><b>${K(g.visits)}</b><span>Aprovação</span><b>${likes(g) == null ? "—" : Math.round(likes(g) * 100) + "%"}</b></div>
+          <div class="vs-a"><a class="pill-btn" href="${gl(g)}">Ver no Saint Data</a><a class="pill-btn icon" href="https://www.roblox.com/games/${g.place}" target="_blank" rel="noopener" aria-label="Jogar no Roblox">${I.play}</a></div></div>
+        <div class="card vs-c">${lead ? `<div class="vs-h">${fnTile(lead, "ic lg")}<div><span class="chip fn">Fortnite</span><h2><a href="${fnl(lead.code)}">${esc(lead.title)}</a></h2><small>${esc(lead.creator)} · ${label(lead.score)}${lead.firstSeen && after(lead.firstSeen) ? ` · apareceu ${ago(lead.firstSeen)}` : ""}</small></div></div>
+          <div class="vs-n"><b>${lead.now == null ? "—" : K(lead.now)}</b><span>${lead.now == null ? "ainda não medido" : "jogando agora"}</span></div>
+          <div class="vs-k"><span>Cópias</span><b>${nfInt.format(f.sameN)}</b><span>Com jogadores</span><b>${nfInt.format(f.m?.alive ?? f.same.filter((x) => x.now > 0).length)}</b><span>Pico 24h</span><b>${lead.peak24 == null ? "—" : K(lead.peak24)}</b></div>
+          <div class="vs-a"><a class="pill-btn" href="${fnl(lead.code)}">Ver mapa</a><button class="pill-btn" type="button" data-copy="${lead.code}">${lead.code}</button></div>`
+          : `<div class="vs-free"><span class="chip up">Livre no Fortnite</span><h2>${f.generic ? "Nome comum demais para comparar" : "Ninguém publicou esse jogo no Fortnite"}</h2><p>${f.generic ? "Esse nome tem palavras muito usadas. Veja os ganchos para entender a concorrência." : "Pelo nome, não há nenhum mapa igual entre os ~280 mil mapas públicos do Fortnite. Boa hora para sair na frente."}</p></div>`}</div>
+      </div>
+      <section class="hero" style="margin-top:16px"><div class="chart" id="vc"><div class="chart-empty loading" style="height:260px"><span>Carregando gráficos…</span></div></div>
+        <div class="chart-bar"><div class="seg" id="vr"></div><div class="seg" id="vm"></div></div>
+        <div class="legend" id="vl"></div></section>
+      <div class="grid2" style="margin-top:16px">
+        <div class="card"><div class="card-h"><h3>Mapas no Fortnite com esse nome</h3></div><div class="rows" id="vcopies"></div>
+          <form class="link-f" id="vlink"><input name="code" placeholder="Vincular outro mapa: 1234-5678-9012" inputmode="numeric" aria-label="Código do mapa do Fortnite"><button class="pill-btn" type="submit">Vincular</button></form></div>
+        <div class="card"><div class="card-h"><h3>Minha ideia</h3></div><div id="videa"></div></div>
+      </div>`);
+    const copies = () => fnFor(g).all;
+    const drawCopies = () => {
+      const all = copies();
+      document.getElementById("vcopies").innerHTML = all.map((x) => `<div class="r cp">${fnTile(x)}<a class="t" href="${fnl(x.code)}"><span class="nm">${esc(x.title)}</span><span class="sb">${esc(x.creator)} · ${x.manual ? "vinculado por você" : label(x.score)}${x.firstSeen && after(x.firstSeen) ? ` · apareceu ${ago(x.firstSeen)}` : ""}</span></a><span class="v">${x.now == null ? '<small>não medido</small>' : K(x.now)}<small>${x.peak24 ? `pico ${K(x.peak24)}` : "agora"}</small></span><button type="button" class="act" data-unlink="${x.code}" title="Não é o mesmo jogo" aria-label="Não é o mesmo jogo"><svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg></button></div>`).join("")
+        || empty(f.generic ? "Nome genérico: não dá para comparar só pelo nome." : "Nenhum mapa do Fortnite com esse nome.");
+      const total = f.m?.n ?? 0;
+      if (total > all.length) document.getElementById("vcopies").insertAdjacentHTML("beforeend", `<p class="note">Mostrando os ${all.length} mais relevantes de ${nfInt.format(total)} mapas com nome igual ou parecido.</p>`);
+    };
+    drawCopies();
+    document.getElementById("vcopies").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-unlink]"); if (!b) return;
+      const code = b.dataset.unlink, un = store.get("sd-fn-unlink", {}), ln = store.get("sd-fn-link", {});
+      if ((ln[g.id] || []).some((x) => x.code === code)) { ln[g.id] = ln[g.id].filter((x) => x.code !== code); store.set("sd-fn-link", ln); }
+      else { un[g.id] = [...new Set([...(un[g.id] || []), code])]; store.set("sd-fn-unlink", un); }
+      toast("Tirado da lista deste jogo"); drawCopies(); drawChart();
+    });
+    document.getElementById("vlink").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const code = e.target.code.value.trim();
+      if (!isCode(code)) return toast("Use o código no formato 1234-5678-9012");
+      const meta = await epic(`/islands/${code}`);
+      if (!meta?.code) return toast("Mapa não encontrado na Epic");
+      const ln = store.get("sd-fn-link", {}); ln[g.id] = [...(ln[g.id] || []).filter((x) => x.code !== code), { code, title: meta.title, creator: meta.creatorCode }];
+      store.set("sd-fn-link", ln); e.target.reset(); toast("Mapa vinculado"); drawCopies(); drawChart();
+    });
+    $view.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Código copiado"); } catch { toast(b.dataset.copy); } }));
+    // ideia
+    const drawIdea = () => {
+      const it = ideas()[g.id];
+      document.getElementById("videa").innerHTML = it ? `
+        <div class="seg" id="vist">${IDEA_ST.map(([k, l]) => `<button type="button" data-k="${k}" class="${k === it.status ? "on" : ""}">${l}</button>`).join("")}</div>
+        <textarea id="vnote" rows="3" placeholder="Anotações: gancho, mecânica, nome que você vai usar…">${esc(it.note)}</textarea>
+        <label class="field"><span>Código do seu mapa (quando publicar)</span><input id="vcode" placeholder="1234-5678-9012" value="${esc(it.code)}"></label>
+        <div id="vmine"></div>
+        <button class="see" type="button" id="vdel">Remover das ideias</button>`
+        : `<p class="empty">Salve este jogo nas suas ideias para anotar o gancho e acompanhar o seu mapa quando publicar.</p><button class="pill-btn dark" type="button" id="vadd">${I.star(false)}Salvar ideia</button>`;
+      document.getElementById("vadd")?.addEventListener("click", () => { setIdea(g, {}); toast("Salvo em Ideias"); drawIdea(); });
+      document.getElementById("vdel")?.addEventListener("click", () => { setIdea(g, null); toast("Ideia removida"); drawIdea(); });
+      document.querySelectorAll("#vist button").forEach((b) => b.addEventListener("click", () => { setIdea(g, { status: b.dataset.k }); document.querySelectorAll("#vist button").forEach((x) => x.classList.toggle("on", x === b)); slide(document.getElementById("vist")); if (b.dataset.k === "publicado" && !toggleSetHas("sd-fn-done", g.id)) toggleSet("sd-fn-done", g.id); }));
+      slide(document.getElementById("vist"));
+      let nt; document.getElementById("vnote")?.addEventListener("input", (e) => { clearTimeout(nt); nt = setTimeout(() => setIdea(g, { note: e.target.value }), 300); });
+      document.getElementById("vcode")?.addEventListener("change", (e) => { const v = e.target.value.trim(); if (v && !isCode(v)) return toast("Use o formato 1234-5678-9012"); setIdea(g, { code: v }); drawMine(); drawChart(); });
+      drawMine();
+    };
+    const drawMine = async () => {
+      const it = ideas()[g.id], box = document.getElementById("vmine"); if (!box) return;
+      if (!it?.code) { box.innerHTML = ""; return; }
+      box.innerHTML = '<p class="note">Buscando o seu mapa…</p>';
+      const [meta, j] = await Promise.all([epic(`/islands/${it.code}`), epic(`/islands/${it.code}/metrics/hour`)]);
+      const ccu = (j?.peakCCU || []).map((x) => x.value).filter((x) => x != null);
+      box.innerHTML = meta?.code ? `<a class="r" href="${fnl(it.code)}">${fnTile({ code: it.code, title: meta.title })}<span class="t"><span class="nm">${esc(meta.title)}</span><span class="sb">Seu mapa · ${esc(meta.creatorCode)}</span></span><span class="v">${ccu.length ? K(ccu[ccu.length - 1]) : "—"}<small>pico 24h ${ccu.length ? K(Math.max(...ccu)) : "—"}</small></span></a>` : '<p class="note">Não achei esse código na Epic (mapas privados não aparecem).</p>';
+    };
+    drawIdea();
+    // gráfico
+    let range = store.get("sd-vs-range", "1w"), mode = store.get("sd-vs-mode", "own");
+    const drawChart = async () => {
+      document.getElementById("vr").innerHTML = [["1d", "24h"], ["1w", "7 dias"]].map(([k, l]) => `<button type="button" data-r="${k}" class="${k === range ? "on" : ""}">${l}</button>`).join("");
+      document.getElementById("vm").innerHTML = [["own", "Cada um na sua escala"], ["real", "Valores reais"]].map(([k, l]) => `<button type="button" data-m="${k}" class="${k === mode ? "on" : ""}">${l}</button>`).join("");
+      slide(document.getElementById("vr")); slide(document.getElementById("vm"));
+      document.querySelectorAll("#vr button").forEach((b) => b.addEventListener("click", () => { range = b.dataset.r; store.set("sd-vs-range", range); drawChart(); }));
+      document.querySelectorAll("#vm button").forEach((b) => b.addEventListener("click", () => { mode = b.dataset.m; store.set("sd-vs-mode", mode); drawChart(); }));
+      const it = ideas()[g.id];
+      const codes = [...(it?.code ? [{ code: it.code, title: "Seu mapa", mine: true }] : []), ...fnFor(g).same.slice(0, it?.code ? 2 : 3)];
+      const [fine, gf, ...fns] = await Promise.all([loadShard(g.id), loadG(g.id), ...codes.map((c) => fnSeries(c.code, range === "1d" ? "1d" : "1w"))]);
+      const rbx = range === "1d" ? gameSeries(fine, gf, "1d", "ccu") : sinceT(pts(gf?.h, HOUR), S.data.slot - 7 * DAY);
+      const series = [{ pts: rbx, color: RBX_COLOR, name: `${g.name} (Roblox)` }, ...codes.map((c, i) => ({ pts: fns[i] || [], color: c.mine ? "#16a34a" : FN_COLORS[i], name: `${c.title} (Fortnite)` }))].filter((s) => s.pts.some((p) => p.y != null));
+      if (mode === "own") for (const s of series) { const mx = Math.max(1, ...s.pts.map((p) => p.y ?? 0)); s.pts = s.pts.map((p) => ({ ...p, o: p.y, y: p.y == null ? null : (p.y / mx) * 100 })); }
+      const box = document.getElementById("vc"); if (!box) return;
+      lineChart(box, series, { h: 280, fmt: K, empty: "Sem pontos suficientes ainda." });
+      document.getElementById("vl").innerHTML = series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("") + (mode === "own" ? '<span class="muted">Cada linha usa a própria escala (o topo é o pico de cada um) para comparar o formato da curva.</span>' : "");
+    };
+    drawChart();
+  });
+}
+const toggleSetHas = (k, id) => prefSet(k).has(id);
+
+/* ---------- Cópias recentes ---------- */
+function pageCopies() {
+  withFN(() => {
+    const min = Number(store.get("sd-cp-min", "1000"));
+    const list = (FN.copies?.copies || []).map((c) => ({ ...c, g: S.byId.get(c.rid) })).filter((c) => c.g && c.g.playing >= min);
+    const base = FN.copies?.baseline;
+    fnFrame("copias", `
+      <div class="page-h"><div><h1>Cópias recentes</h1><p>Mapas que acabaram de aparecer no Fortnite com o nome de um jogo do top do Roblox. Mostra quem chegou primeiro.</p></div><div class="dd" id="cpmin" style="margin-left:auto"></div></div>
+      ${base ? `<p class="note" style="margin:-6px 2px 12px">Contando a partir de ${dhfmt.format(new Date(base))}, quando o Saint Data começou a olhar o Fortnite.</p>` : ""}
+      <div class="card"><div class="feed">${list.slice(0, 200).map((c) => `<a class="ev" href="#/lado/${c.rid}">${fnTile(c)}<span class="tx"><span class="chip fn">Fortnite</span> <b>${esc(c.title)}</b> <span class="muted">por ${esc(c.creator)}</span> é cópia de ${icon(c.g, "ic xs")}<b>${esc(c.g.name)}</b> <span class="muted">(${K(c.g.playing)} jogando no Roblox)</span>${c.now ? ` · ${K(c.now)} jogando no Fortnite` : ""}</span><span class="when">${ago(c.at)}</span></a>`).join("") || empty("Nenhuma cópia nova ainda. A lista começa a encher conforme novos mapas aparecem no Fortnite (o catálogo é conferido de hora em hora).")}</div></div>`);
+    dropdown(document.getElementById("cpmin"), [["0", "Todos os jogos"], ["1000", "Jogos com 1K+"], ["10000", "Jogos com 10K+"], ["100000", "Jogos com 100K+"]], String(min), (k) => { store.set("sd-cp-min", k); pageCopies(); afterRender(); });
+  });
+}
+
+/* ---------- Ganchos: palavras em alta no Roblox × saturação no Fortnite ---------- */
+const HOOK_SORT = [["opp", "Oportunidade"], ["rbx", "Mais jogadas no Roblox"], ["grow", "Crescendo no Roblox"], ["newr", "Mais jogos novos no Roblox"], ["fn", "Mais jogadas no Fortnite"], ["sat", "Menos concorrência no Fortnite"]];
+function pageHooks() {
+  withFN(() => {
+    const sort = store.get("sd-hk-sort", "opp");
+    const W = FN.tokens?.words || {};
+    const rows = S.words.filter((w) => w.games.length >= 3).map((w) => {
+      const t = W[w.w] || [0, 0, 0, 0];
+      const score = Math.log10(Math.max(w.playing, 10)) * (1 + Math.max(-0.5, Math.min(2, w.d1 ?? 0))) * (1 + Math.min(10, w.newCount) / 4) / Math.log10(10 + t[2]);
+      return { w, fn: { count: t[0], alive: t[1], ccu: t[2], fresh: t[3] }, score };
+    });
+    const mx = Math.max(1e-9, ...rows.map((r) => r.score));
+    rows.forEach((r) => (r.s = Math.round((r.score / mx) * 100)));
+    const S2 = { opp: (a, b) => b.s - a.s, rbx: (a, b) => b.w.playing - a.w.playing, grow: (a, b) => (b.w.d1 ?? -9) - (a.w.d1 ?? -9), newr: (a, b) => b.w.newCount - a.w.newCount, fn: (a, b) => b.fn.ccu - a.fn.ccu, sat: (a, b) => a.fn.ccu - b.fn.ccu || b.w.playing - a.w.playing };
+    rows.sort(S2[sort] || S2.opp);
+    fnFrame("ganchos", `
+      <div class="page-h"><div><h1>Ganchos</h1><p>Palavras dos nomes dos jogos em alta no Roblox e quanto delas já existe no Fortnite. Gancho bom = muita gente no Roblox, pouca no Fortnite.</p></div><div class="dd" id="hks" style="margin-left:auto"></div></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Oport.</th><th class="l">Gancho</th><th>Jogos no Roblox</th><th>Novos (30d)</th><th>Jogando no Roblox</th><th>24h</th><th>Mapas no Fortnite</th><th>Com jogadores</th><th>Jogando no Fortnite</th><th>Novos no FN (7d)</th></tr></thead><tbody>
+      ${rows.slice(0, 250).map((r) => `<tr data-href="#/tendencias/${encodeURIComponent(r.w.w)}"><td class="l oppc">${oppBar(r.s)}</td><td class="l"><a class="gname" href="#/tendencias/${encodeURIComponent(r.w.w)}">${stack(r.w.games)}<span><b>${esc(r.w.label)}</b><small>${plusMore(r.w.games)}</small></span></a></td><td>${nfInt.format(r.w.games.length)}</td><td>${nfInt.format(r.w.newCount)}</td><td class="pl">${K(r.w.playing)}</td><td>${chg(r.w.d1)}</td><td>${nfInt.format(r.fn.count)}</td><td>${nfInt.format(r.fn.alive)}</td><td class="pl">${K(r.fn.ccu)}</td><td>${nfInt.format(r.fn.fresh)}</td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="note">“Com jogadores” e “Jogando no Fortnite” contam os mapas que o Saint Data mede (os maiores de cada gênero e as cópias de jogos do Roblox).</p>`);
+    dropdown(document.getElementById("hks"), HOOK_SORT, sort, (k) => { store.set("sd-hk-sort", k); pageHooks(); afterRender(); });
+    wireRows($view);
+  });
+}
+
+/* ---------- Ideias ---------- */
+function pageIdeas() {
+  withFN(() => {
+    const all = ideas(), list = Object.entries(all).map(([id, it]) => ({ id: Number(id), it, g: S.byId.get(Number(id)) })).sort((a, b) => IDEA_ST.findIndex((x) => x[0] === a.it.status) - IDEA_ST.findIndex((x) => x[0] === b.it.status) || (b.it.at > a.it.at ? 1 : -1));
+    const cnt = (k) => list.filter((x) => x.it.status === k).length;
+    fnFrame("ideias", `
+      <div class="page-h"><div><h1>Ideias</h1><p>${IDEA_ST.map(([k, l]) => `${cnt(k)} ${l.toLowerCase()}`).join(" · ")}. Ficam salvas neste navegador.</p></div>
+        <div class="g-acts" style="margin-left:auto"><button class="pill-btn" type="button" id="iexp">Exportar</button><label class="pill-btn" style="cursor:pointer">Importar<input type="file" id="iimp" accept="application/json" hidden></label></div></div>
+      <div class="card"><div class="rows">${list.map(({ id, it, g }) => { const f = g ? fnFor(g) : null; return `<a class="r idea" href="${g ? `#/lado/${id}` : "#/minerar/ideias"}">${g ? icon(g) : `<span class="ic">${esc((it.name || "?")[0])}</span>`}<span class="t"><span class="nm">${esc(g?.name || it.name)}</span><span class="sb"><span class="chip ${it.status === "publicado" ? "up" : it.status === "fazendo" ? "new" : ""}">${IDEA_ST.find((x) => x[0] === it.status)?.[1]}</span> ${it.note ? esc(it.note.slice(0, 90)) : g ? `${age(g.created)} · ${esc(genre(g.genre))}` : "saiu do top do Roblox"}</span></span><span class="v">${g ? K(g.playing) : "—"}<small>${f ? (f.sameN ? `${f.sameN} no Fortnite` : "livre no Fortnite") : ""}</small></span></a>`; }).join("") || empty("Nenhuma ideia salva. No Minerador, toque na estrela de um jogo para salvar.")}</div></div>`);
+    document.getElementById("iexp").addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify({ ideas: ideas(), done: [...prefSet("sd-fn-done")], ignored: [...prefSet("sd-fn-ign")], unlink: store.get("sd-fn-unlink", {}), link: store.get("sd-fn-link", {}) }, null, 2)], { type: "application/json" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `saint-data-ideias-${todayBR()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+    document.getElementById("iimp").addEventListener("change", async (e) => {
+      try {
+        const j = JSON.parse(await e.target.files[0].text());
+        store.set("sd-ideas", { ...ideas(), ...(j.ideas || {}) });
+        store.set("sd-fn-done", [...new Set([...prefSet("sd-fn-done"), ...(j.done || [])])]);
+        store.set("sd-fn-ign", [...new Set([...prefSet("sd-fn-ign"), ...(j.ignored || [])])]);
+        store.set("sd-fn-unlink", { ...store.get("sd-fn-unlink", {}), ...(j.unlink || {}) });
+        store.set("sd-fn-link", { ...store.get("sd-fn-link", {}), ...(j.link || {}) });
+        toast("Importado"); pageIdeas(); afterRender();
+      } catch { toast("Arquivo inválido"); }
+    });
+  });
+}
+
+/* ---------- Top Fortnite e Novos no Fortnite ---------- */
+const FN_TABS = [["", "Mais jogados"], ["subindo", "Subindo"], ["roblox", "Cópias de jogos do Roblox"], ["criadores", "Criadores"]];
+function fnTable(list, { limit = 100, rank = true } = {}) {
+  const rows = list.slice(0, limit).map((x, i) => `<tr data-href="${fnl(x.code)}"><td class="rk">${rank ? rankBadge(i + 1) : ""}</td><td class="l"><a class="gname" href="${fnl(x.code)}">${fnTile(x)}<span><b>${esc(x.title)}</b><small>${fnSub(x)}</small></span></a></td><td class="pl">${x.now == null ? "—" : nfInt.format(x.now)}</td><td>${chg(x.d1)}</td><td>${x.peak24 == null ? "—" : K(x.peak24)}</td><td>${x.plays24 == null ? "—" : K(x.plays24)}</td><td>${x.avgMin == null ? "—" : nf(x.avgMin, 0) + " min"}</td><td>${x.ret1 == null ? "—" : Math.round(x.ret1 * 100) + "%"}</td><td>${x.fav24 == null ? "—" : K(x.fav24)}</td><td class="sp">${sparkline(x.spark || [])}</td></tr>`).join("");
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">#</th><th class="l">Mapa</th><th>↓ Jogando</th><th>24h</th><th>Pico 24h</th><th>Partidas 24h</th><th>Tempo médio</th><th>Retenção D1</th><th>Favoritos 24h</th><th>24h</th></tr></thead><tbody>${rows || `<tr><td colspan="10" class="l muted" style="padding:20px">Nada por aqui ainda.</td></tr>`}</tbody></table></div>`;
+}
+function pageFortnite(tab = "") {
+  if (tab === "novos") return pageFnNew();
+  withFN(() => {
+    const P = { genre: "", epic: false, q: "", ...store.get("sd-fnt", {}) };
+    const T = FN.top?.total, isl = FN.top?.islands || [];
+    fnFrame("fortnite", `
+      <section class="hero"><div class="hero-top"><span class="live-dot"></span>${flowHTML("fn-total", T?.inMatch ?? 0)}</div>
+        <div class="hero-sub">${T?.d1 != null ? `${chg(T.d1)}<span class="muted">nas últimas 24h ·</span>` : ""}<span class="muted">jogando Fortnite agora (em partida) · ${T?.inClient ? `${words(T.inClient)} com o jogo aberto · ` : ""}${stamp()}</span></div>
+        <div class="chart" id="ftc"></div></section>
+      <div class="subtabs">${FN_TABS.map(([k, l]) => `<a class="subtab ${k === tab ? "on" : ""}" href="#/fortnite${k ? "/" + k : ""}">${l}</a>`).join("")}<span class="sep"></span><div class="dd" id="fgen"></div><button type="button" class="tgl sm ${P.epic ? "on" : ""}" id="fepic"><span class="sw"></span>Esconder mapas da Epic</button><label class="searchbox">${I.search}<input id="fq" type="search" placeholder="Filtrar" value="${esc(P.q)}" aria-label="Filtrar mapas"></label></div>
+      <div id="ft"></div>`);
+    const th = FN.total?.h;
+    if (th?.ts?.length) lineChart(document.getElementById("ftc"), [{ pts: th.ts.map((t, i) => ({ x: new Date(t).getTime(), y: th.inMatch[i] })).filter((p) => p.x >= Date.now() - 7 * DAY), color: FN_COLORS[0] }], { h: 210, gapMax: 3 });
+    else document.getElementById("ftc").innerHTML = "";
+    const draw = () => {
+      let list = isl.filter((x) => (!P.genre || x.genres?.some((y) => y.g === P.genre)) && (!P.epic || x.creator !== "epic") && (!P.q || x.title.toLowerCase().includes(P.q.toLowerCase()) || x.creator.toLowerCase().includes(P.q.toLowerCase())));
+      const host = document.getElementById("ft");
+      if (tab === "criadores") {
+        const m = new Map();
+        for (const x of list) { const e = m.get(x.creator) || { c: x.creator, maps: [], now: 0, plays: 0 }; e.maps.push(x); e.now += x.now || 0; e.plays += x.plays24 || 0; m.set(x.creator, e); }
+        const cr = [...m.values()].sort((a, b) => b.now - a.now);
+        host.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">#</th><th class="l">Criador</th><th>↓ Jogando</th><th>Mapas medidos</th><th>Partidas 24h</th><th class="l">Maior mapa</th></tr></thead><tbody>${cr.slice(0, 200).map((e, i) => `<tr data-href="${fnl(e.maps[0].code)}"><td class="rk">${rankBadge(i + 1)}</td><td class="l"><span class="gname">${fnTile({ code: e.c, title: e.c })}<span><b>${esc(e.c)}</b><small>${esc(e.maps.slice(0, 2).map((x) => x.title).join(", "))}</small></span></span></td><td class="pl">${nfInt.format(e.now)}</td><td>${nfInt.format(e.maps.length)}</td><td>${K(e.plays)}</td><td class="l">${esc(e.maps[0].title)}</td></tr>`).join("")}</tbody></table></div>`;
+      } else {
+        if (tab === "subindo") list = list.filter((x) => x.d1 != null && (x.now ?? 0) >= 100).sort((a, b) => b.d1 - a.d1);
+        if (tab === "roblox") list = list.filter((x) => x.rbx?.length);
+        host.innerHTML = fnTable(list, { limit: 200 });
+        if (tab === "roblox") host.querySelectorAll("tbody tr").forEach((tr, i) => { const x = list[i], g = S.byId.get(x.rbx[0]); if (g) tr.querySelector("small").insertAdjacentHTML("beforeend", ` · cópia de <b>${esc(g.name)}</b>`); });
+      }
+      wireRows(host);
+    };
+    const gens = [...new Set(isl.flatMap((x) => (x.genres || []).map((y) => y.g)))];
+    dropdown(document.getElementById("fgen"), [["", "Todos os gêneros"], ...gens.map((k) => [k, FN_GENRES[k] || k])], P.genre, (k) => { P.genre = k; store.set("sd-fnt", P); pageFortnite(tab); afterRender(); });
+    document.getElementById("fepic").addEventListener("click", (e) => { P.epic = !P.epic; store.set("sd-fnt", P); e.currentTarget.classList.toggle("on", P.epic); draw(); });
+    let qt; document.getElementById("fq").addEventListener("input", (e) => { clearTimeout(qt); qt = setTimeout(() => { P.q = e.target.value; store.set("sd-fnt", P); draw(); }, 150); });
+    draw();
+  });
+}
+function pageFnNew() {
+  withFN(() => {
+    const list = FN.news?.islands || [];
+    const withPlayers = list.filter((x) => (x.now ?? 0) >= 1).sort((a, b) => b.now - a.now);
+    const base = FN.news?.baseline;
+    fnFrame("novos", `
+      <div class="page-h"><div><h1>Novos no Fortnite</h1><p>Mapas que apareceram nos últimos 7 dias${base ? ` (desde ${dhfmt.format(new Date(base))}, quando o monitoramento começou)` : ""}: ${nfInt.format(list.length)} no total, ${nfInt.format(withPlayers.length)} já com jogadores.</p></div></div>
+      <div class="sec"><div class="sec-h"><h2>Novos com mais jogadores</h2></div>${fnTable(withPlayers, { limit: 100 })}</div>
+      <div class="sec"><div class="sec-h"><h2>Acabaram de sair</h2></div><div class="card"><div class="feed">${list.slice(0, 120).map((x) => `<a class="ev" href="${fnl(x.code)}">${fnTile(x)}<span class="tx"><b>${esc(x.title)}</b> <span class="muted">por ${esc(x.creator)}${x.tags?.length ? ` · ${esc(x.tags.slice(0, 3).join(", "))}` : ""}</span>${x.rbx?.length && S.byId.get(x.rbx[0]) ? ` · <span class="chip warn">cópia de ${esc(S.byId.get(x.rbx[0]).name)}</span>` : ""}</span><span class="when">${ago(x.firstSeen)}</span></a>`).join("") || empty("A lista começa a encher a partir da segunda coleta do Fortnite.")}</div></div></div>`);
+    wireRows($view);
+  });
+}
+
+/* ---------- Página de um mapa do Fortnite ---------- */
+const FN_METRICS = [["peakCCU", "Jogadores"], ["plays", "Partidas"], ["uniquePlayers", "Jogadores únicos"], ["minutesPlayed", "Minutos jogados"], ["favorites", "Favoritos"], ["recommendations", "Recomendações"]];
+function pageMap(code) {
+  if (!isCode(code) && !/^[a-z0-9_-]+$/i.test(code)) return notFound("Mapa não encontrado");
+  withFN(async () => {
+    let x = FN.byCode.get(code);
+    if (!x) { const meta = await epic(`/islands/${code}`); if (location.hash !== fnl(code)) return; if (!meta?.code) return notFound("Mapa não encontrado", "A Epic só mostra dados de mapas públicos."); x = { code, title: meta.title, creator: meta.creatorCode, tags: meta.tags || [], createdIn: meta.createdIn, genres: [], rbx: [] }; }
+    const rb = (x.rbx || []).map((id) => S.byId.get(id)).filter(Boolean);
+    const more = (FN.top?.islands || []).filter((y) => y.creator === x.creator && y.code !== code).slice(0, 5);
+    const same = (FN.top?.islands || []).filter((y) => y.code !== code && y.genres?.some((a) => x.genres?.some((b) => b.g === a.g))).slice(0, 5);
+    fnFrame("fortnite", `
+      <div class="g-head"><div>${fnTile(x, "ic lg")}<h1>${esc(x.title)}</h1><div class="by">Por <b>${esc(x.creator)}</b> · ${esc(x.createdIn || "Fortnite")}${x.genres?.[0] ? ` · <span class="chip">#${x.genres[0].r} em ${esc(FN_GENRES[x.genres[0].g] || x.genres[0].g)}</span>` : ""}</div>
+        <div class="tags">${(x.tags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join(" ")}</div></div>
+        <div class="g-acts"><button class="pill-btn" type="button" data-copy="${code}">${code}</button><a class="pill-btn icon" href="${fnPlay(x)}" target="_blank" rel="noopener" aria-label="Abrir no Fortnite" title="Abrir no Fortnite">${I.play}</a></div></div>
+      <section class="hero" id="mh" style="margin-top:14px"><div class="hero-top"><span class="live-dot"></span>${flowHTML("fn" + code, x.now ?? 0)}</div><div class="hero-sub" id="msub"><span class="muted">${x.now == null ? "carregando…" : "jogando agora"}${x.checked ? ` · medido ${ago(x.checked)}` : ""}</span></div>
+        <div class="chart" id="mc"><div class="chart-empty loading" style="height:220px"><span>Carregando da Epic…</span></div></div>
+        <div class="chart-bar"><div class="seg" id="mr"></div><div class="dd" id="mm"></div></div></section>
+      <div class="strip">
+        <div><small>Pico 24h</small><b>${x.peak24 == null ? "—" : K(x.peak24)}</b></div>
+        <div class="hot"><small>Partidas 24h</small><b>${x.plays24 == null ? "—" : K(x.plays24)}</b></div>
+        <div><small>Tempo médio</small><b>${x.avgMin == null ? "—" : nf(x.avgMin, 0) + " min"}</b></div>
+        <div><small>Retenção D1</small><b>${x.ret1 == null ? "—" : Math.round(x.ret1 * 100) + "%"}</b></div>
+        <div><small>Favoritos 24h</small><b>${x.fav24 == null ? "—" : K(x.fav24)}</b></div>
+      </div>
+      ${rb.length ? `<div class="sec"><div class="sec-h"><h2>Jogo do Roblox com esse nome</h2></div><div class="card"><div class="rows">${rb.map((g) => rowGame(g, `${age(g.created)} · ${esc(genre(g.genre))}`, `${K(g.playing)}<small><a href="#/lado/${g.id}">lado a lado →</a></small>`)).join("")}</div></div></div>` : ""}`,
+    { rail: `${more.length ? card(`Mais de ${esc(x.creator)}`, "", null, `<div class="rows">${more.map((y) => `<a class="r" href="${fnl(y.code)}">${fnTile(y)}<span class="t"><span class="nm">${esc(y.title)}</span><span class="sb">${fnSub(y)}</span></span><span class="v">${K(y.now)}${chg(y.d1)}</span></a>`).join("")}</div>`) : ""}${same.length ? card("Mesmo gênero", "", null, `<div class="rows">${same.map((y) => `<a class="r" href="${fnl(y.code)}">${fnTile(y)}<span class="t"><span class="nm">${esc(y.title)}</span><span class="sb">${esc(y.creator)}</span></span><span class="v">${K(y.now)}${chg(y.d1)}</span></a>`).join("")}</div>`) : ""}` || card("Fortnite", "", "#/fortnite", empty("Sem mais mapas medidos deste criador.")) });
+    $view.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Código copiado"); } catch { toast(b.dataset.copy); } }));
+    afterRender();
+    let range = store.get("sd-map-range", "1d"), metric = "peakCCU";
+    const draw = async () => {
+      document.getElementById("mr").innerHTML = [["1d", "24h"], ["1w", "7 dias"], ["dia", "Por dia"]].map(([k, l]) => `<button type="button" data-r="${k}" class="${k === range ? "on" : ""}">${l}</button>`).join("");
+      slide(document.getElementById("mr"));
+      document.querySelectorAll("#mr button").forEach((b) => b.addEventListener("click", () => { range = b.dataset.r; store.set("sd-map-range", range); draw(); }));
+      dropdown(document.getElementById("mm"), FN_METRICS, metric, (k) => { metric = k; draw(); });
+      const arr = await fnSeries(code, range, metric);
+      const box = document.getElementById("mc"); if (!box || location.hash !== fnl(code)) return;
+      const last = [...arr].reverse().find((p) => p.y != null);
+      const num = document.querySelector("#mh number-flow");
+      if (metric === "peakCCU" && range !== "dia" && last) { setFlow(num, last.y); document.getElementById("msub").innerHTML = `<span class="muted">jogando agora · Epic, ${hfmt.format(new Date(last.x))}</span>`; }
+      const rest = document.getElementById("msub").innerHTML;
+      lineChart(box, [{ pts: arr, color: FN_COLORS[0] }], { h: 230, gapMax: 3, empty: "A Epic ainda não tem dados deste mapa nesse período.", onHover: metric === "peakCCU" && range !== "dia" && last ? heroHover(num, document.getElementById("msub"), last.y, rest) : null });
+    };
+    draw();
+  });
+}
+
+/* ---------- peças do Fortnite em outras páginas ---------- */
+// card "Oportunidades pro Fortnite" no início
+function homeMineCard() {
+  const host = document.getElementById("hmine"); if (!host) return;
+  loadFN().then(() => {
+    if (!document.getElementById("hmine")) return;
+    const rows = S.data.games.filter((g) => g.playing >= 1000).map((g) => { const f = fnFor(g); return { g, f, s: opportunity(g, f) }; }).filter((r) => !existsFN(r.f, "any") && !prefSet("sd-fn-ign").has(r.g.id) && !prefSet("sd-fn-done").has(r.g.id)).sort((a, b) => b.s - a.s).slice(0, 5);
+    host.innerHTML = rows.map(({ g, f, s }) => `<a class="r" href="#/lado/${g.id}">${icon(g)}<span class="t"><span class="nm">${esc(g.name)}</span><span class="sb">${age(g.created)} · ${f.generic ? "nome genérico" : "livre no Fortnite"}</span></span><span class="v">${K(g.playing)}<small>nota ${s}</small></span></a>`).join("") || empty("Nada livre no Fortnite agora.");
+  }).catch(() => { const h = document.getElementById("hmine"); if (h) h.innerHTML = empty("Os dados do Fortnite chegam na primeira coleta."); });
+}
+// bloco "No Fortnite" na página de um jogo do Roblox
+function gameFnBox(g) {
+  const host = document.getElementById("fnbox"); if (!host) return;
+  loadFN().then(() => {
+    const h = document.getElementById("fnbox"); if (!h) return;
+    const f = fnFor(g);
+    h.innerHTML = `<div class="sec"><div class="sec-h"><h2>No Fortnite</h2><a class="see" href="#/lado/${g.id}">Lado a lado</a></div>
+      <div class="fn-sum">${fnBadge(f, { long: true })}<span class="oppw">Oportunidade ${oppBar(opportunity(g, f))}</span></div>
+      <div class="rows">${f.all.slice(0, 4).map((x) => `<a class="r" href="${fnl(x.code)}">${fnTile(x)}<span class="t"><span class="nm">${esc(x.title)}</span><span class="sb">${esc(x.creator)} · ${x.score >= 0.85 ? "mesmo nome" : x.score >= 0.6 ? "quase igual" : "parecido"}</span></span><span class="v">${x.now == null ? "—" : K(x.now)}<small>jogando</small></span></a>`).join("")}</div></div>`;
+  }).catch(() => {});
+}
+// palavras: mapas do Fortnite com a mesma palavra
+function wordFnBox(w) {
+  const host = document.getElementById("fnword"); if (!host) return;
+  loadFN().then(() => {
+    const h = document.getElementById("fnword"); if (!h) return;
+    const t = FN.tokens?.words?.[w];
+    const re = new RegExp(`(^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}\\p{N}]|$)`, "iu");
+    const list = (FN.top?.islands || []).filter((x) => re.test(x.title)).slice(0, 50);
+    h.innerHTML = `<div class="sec"><div class="sec-h"><h2>No Fortnite</h2><span class="muted">${t ? `${nfInt.format(t[0])} mapas usam essa palavra · ${nfInt.format(t[1])} com jogadores · ${K(t[2])} jogando` : ""}</span></div>${fnTable(list, { limit: 50 })}</div>`;
+    wireRows(h);
+  }).catch(() => {});
+}
+
 /* =========================================================== busca, tema, menu */
 const $layer = document.getElementById("search-layer"), $q = document.getElementById("search-q"), $res = document.getElementById("search-res");
-function openSearch() { $layer.hidden = false; $q.value = ""; searchRender(); setTimeout(() => $q.focus(), 0); }
+function openSearch() { loadFN().then(() => { if (!$layer.hidden) searchRender(); }).catch(() => {}); $layer.hidden = false; $q.value = ""; searchRender(); setTimeout(() => $q.focus(), 0); }
 function closeSearch() { $layer.hidden = true; }
 function searchRender() {
   if (!S.data) return;
@@ -799,6 +1310,7 @@ function searchRender() {
   const gens = q ? S.genres.filter((x) => genre(x.key).toLowerCase().includes(q)).slice(0, 3) : [];
   $res.innerHTML = (games.length ? `<h4>Jogos</h4>${games.map((g) => rowGame(g, `${esc(g.creator)} · ${esc(genre(g.genre))}`, `${K(g.playing)}${chg(g.d1 ?? g.d1h)}`)).join("")}` : "")
     + (studios.length ? `<h4>Estúdios</h4>${studios.map((s) => `<a class="r" href="${sl(s.key)}">${icon(s.games[0])}<span class="t"><span class="nm">${esc(s.key)}</span><span class="sb">${s.games.length} jogos</span></span><span class="v">${K(s.playing)}</span></a>`).join("")}` : "")
+    + (q && FN.top ? (() => { const fx = [...FN.byCode.values()].filter((x) => x.title.toLowerCase().includes(q) || x.code === q).sort((a, b) => (b.now ?? 0) - (a.now ?? 0)).slice(0, 5); return fx.length ? `<h4>Fortnite</h4>${fx.map((x) => `<a class="r" href="${fnl(x.code)}">${fnTile(x)}<span class="t"><span class="nm">${esc(x.title)}</span><span class="sb">${esc(x.creator)}</span></span><span class="v">${x.now == null ? "" : K(x.now)}</span></a>`).join("")}` : ""; })() : "")
     + (gens.length ? `<h4>Gêneros</h4>${gens.map((x) => `<a class="r" href="${genl(x.key)}">${stack(x.games)}<span class="t"><span class="nm">${esc(genre(x.key))}</span><span class="sb">${x.games.length} jogos</span></span><span class="v">${K(x.playing)}</span></a>`).join("")}` : "")
     || '<p class="empty" style="padding:12px">Nada encontrado.</p>';
 }
@@ -823,9 +1335,9 @@ function route() {
   if (window.__sdScroll) { window.removeEventListener("scroll", window.__sdScroll); window.__sdScroll = null; }
   const [a = "", b = "", ...rest] = location.hash.replace(/^#\/?/, "").split("/").map((x) => decodeURIComponent(x));
   const tail = [b, ...rest].filter(Boolean).join("/");
-  const nav = { atividade: "atividade", watchlist: "watchlist", comparar: "comparar" }[a] ?? "terminal";
+  const nav = { atividade: "atividade", watchlist: "watchlist", comparar: "comparar", minerar: "minerar", fortnite: "minerar", mapa: "minerar", lado: "minerar" }[a] ?? "terminal";
   document.querySelectorAll("[data-nav]").forEach((l) => l.classList.toggle("on", l.dataset.nav === nav));
-  const pages = { "": pageHome, jogos: () => pageGames(b), estudios: () => pageStudios(b), estudio: () => pageStudio(tail), genero: () => pageGenre(tail), tendencias: () => pageTrends(tail), rankings: () => pageRankings(b), watchlist: pageWatch, screener: pageScreener, jogo: () => pageGame(b), atividade: pageActivity, comparar: () => pageCompare(b), sobre: pageAbout };
+  const pages = { "": pageHome, jogos: () => pageGames(b), estudios: () => pageStudios(b), estudio: () => pageStudio(tail), genero: () => pageGenre(tail), tendencias: () => pageTrends(tail), rankings: () => pageRankings(b), watchlist: pageWatch, screener: pageScreener, jogo: () => pageGame(b), atividade: pageActivity, comparar: () => pageCompare(b), sobre: pageAbout, minerar: () => pageMine(b), fortnite: () => pageFortnite(b), mapa: () => pageMap(b), lado: () => pageSide(b) };
   (pages[a] || pageHome)();
   afterRender();
   if (a !== "jogo") document.title = "Saint Data · Jogadores ao vivo de todos os jogos do Roblox";
@@ -846,7 +1358,7 @@ async function load(first = true) {
     S.watch = new Set(store.get("sd-watch", []));
     if (changed) { S.shards.clear(); S.gfiles.clear(); }
     document.getElementById("side-stamp").textContent = `Atualizado ${ago(data.t)}`;
-    const quiet = /^#\/(jogo|screener|comparar)/.test(location.hash) || document.activeElement?.matches?.("input,select");
+    const quiet = /^#\/(jogo|screener|comparar|lado|mapa|minerar\/ideias)/.test(location.hash) || document.activeElement?.matches?.("input,select");
     if (first) { route(); window.scrollTo(0, 0); }
     else if (changed && !quiet) { const y = window.scrollY; route(); $view.querySelector(".page")?.classList.remove("fade"); $view.querySelectorAll("svg.draw").forEach((x) => x.classList.remove("draw")); window.scrollTo(0, y); }
     else if (changed && location.hash.startsWith("#/jogo/")) { const g = S.byId.get(Number(location.hash.split("/")[2])), el = $view.querySelector("#gh number-flow"); if (g && el && !el.dataset.hover) setFlow(el, g.playing); }

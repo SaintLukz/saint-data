@@ -24,7 +24,7 @@ const API = "https://api.fortnite.com/ecosystem/v1";
 const PREV = process.env.PREV || "prev";
 const OUT = process.env.OUT || "out";
 const RBX = process.env.RBX || "https://raw.githubusercontent.com/SaintLukz/saint-data/dados/games.json";
-const GAP = Number(process.env.GAP || 340); // ms entre chamadas (a Epic limita rajadas)
+const GAP = Number(process.env.GAP || 300); // ms entre chamadas (a Epic limita rajadas)
 const METRICS_MS = Number(process.env.METRICS_MS || 11 * 60e3); // tempo máximo buscando métricas por execução
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const TOP_PER_GENRE = 150, MATCH_KEEP = 6, TOP_OUT = 2500;
@@ -165,8 +165,9 @@ async function main() {
   }
 
   // 3) quem buscar métricas agora
-  const genres = (await api("/genres")) || state.genres || [];
-  if (Array.isArray(genres) && genres.length) state.genres = genres;
+  const gr = await api("/genres");
+  const genres = Array.isArray(gr) ? gr : Array.isArray(gr?.data) ? gr.data : null;
+  if (genres?.length) state.genres = genres;
   const ranked = new Map(); // code -> [{ g, rank }]
   for (const gen of state.genres || []) {
     const j = await api(`/genres/${gen.slug}/rankings?size=${TOP_PER_GENRE}`);
@@ -261,7 +262,7 @@ async function main() {
     const alive = m.list.filter(([i]) => (known[cat[i].code]?.now ?? 0) >= 1).length;
     const firstNew = m.list.map(([i]) => seen[cat[i].code]).filter((h) => h > 0).sort((a, b) => a - b)[0];
     mOut[rid] = {
-      n: m.n, alive, unchecked: m.list.filter(([i]) => !known[cat[i].code]).length, firstNew: firstNew ? iso(firstNew * HOUR) : null,
+      n: m.n, same: m.list.filter(([, sc]) => sc >= 0.6).length, exact: m.list.filter(([, sc]) => sc >= 0.85).length, alive, unchecked: m.list.filter(([i]) => !known[cat[i].code]).length, firstNew: firstNew ? iso(firstNew * HOUR) : null,
       best: list.map(([i, sc]) => { const c = cat[i].code, k = known[c]; return [c, cat[i].title, cat[i].creator, sc, k ? k.now : null, k ? k.peak24 : null, firstSeenISO(c)]; }),
     };
   }
