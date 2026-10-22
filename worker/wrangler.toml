@@ -9,6 +9,7 @@ workers_dev = true
 [vars]
 REPO = "SaintLukz/saint-data"
 WORKFLOW = "coleta.yml"
+WORKFLOW_FN = "fortnite.yml"
 
 [triggers]
 crons = ["*/10 * * * *"]

@@ -1,0 +1,55 @@
+name: Fortnite
+
+# Disparada de hora em hora pelo Worker "saint-data-agendador" na Cloudflare (workflow_dispatch).
+# Também roda quando o coletor muda e, de reserva, pelo cron do GitHub.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - scripts/fortnite.mjs
+      - .github/workflows/fortnite.yml
+  schedule:
+    - cron: "41 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fortnite
+  cancel-in-progress: false
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Baixar dados anteriores (ramo dados-fn)
+        run: |
+          if git ls-remote --exit-code --heads origin dados-fn >/dev/null; then
+            git clone -q --depth 1 --branch dados-fn "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" prev
+          else
+            mkdir -p prev
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Coletar dados do Fortnite
+        env:
+          PREV: prev
+          OUT: out
+        run: node scripts/fortnite.mjs
+
+      - name: Publicar no ramo dados-fn (substitui a versão anterior)
+        run: |
+          cd out
+          git init -q -b dados-fn
+          git config user.name "saint-data-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "fortnite $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" dados-fn
