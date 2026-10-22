@@ -310,7 +310,8 @@ number-flow.hero-num { display: inline-block; --number-flow-char-height: 1.05em;
 .tip { transition: left 0.12s ease, opacity 0.15s; }
 
 /* indicador que desliza */
-.has-ind { position: relative; isolation: isolate; }
+.has-ind { isolation: isolate; }
+.has-ind:not(.tabs) { position: relative; }
 .has-ind > .ind { position: absolute; left: 0; top: 0; z-index: -1; pointer-events: none; transition: transform 0.32s cubic-bezier(0.34, 1.32, 0.5, 1), width 0.32s cubic-bezier(0.34, 1.32, 0.5, 1), height 0.2s; }
 .seg.has-ind > .ind { background: var(--card); border-radius: 9px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
 .seg.has-ind button.on { background: transparent; box-shadow: none; }

@@ -996,7 +996,7 @@ function pageSide(rid) {
   withFN(() => {
     const f = fnFor(g), idea = ideas()[g.id];
     const lead = f.same[0] || f.all[0] || null;
-    const label = (s) => (s >= 0.85 ? "Mesmo nome" : s >= 0.6 ? "Quase igual" : "Parecido");
+    const label = fnLabel;
     const after = (iso) => iso && FN.top?.baseline && iso > FN.top.baseline;
     fnFrame("minerar", `
       <div class="page-h"><a class="pill-btn icon" href="#/minerar" aria-label="Voltar">${I.back}</a><div><h1>Roblox × Fortnite</h1><p>${esc(g.name)} e o que já existe com esse nome no Fortnite.</p></div></div>
@@ -1094,6 +1094,9 @@ function pageSide(rid) {
   });
 }
 const toggleSetHas = (k, id) => prefSet(k).has(id);
+const fnLabel = (s) => (s >= 0.95 ? "Mesmo nome" : s >= 0.72 ? "Quase igual" : "Parecido");
+// palavras que não dizem nada sobre o jogo (ficam fora dos ganchos)
+const HOOK_STOP = new Set(["player", "players", "now", "dont", "don", "world", "make", "get", "all", "best", "one", "two", "every", "new", "big", "and", "the", "you", "but", "more", "most", "real", "super", "ultra", "mega", "pro", "max", "best", "top", "big", "little", "tiny", "fun", "game", "games", "mode", "modes", "upd", "update", "official", "original", "classic", "plus", "online", "hub", "time", "day", "days", "night", "nights", "year", "live", "lite", "beta", "alpha", "anniversary", "halloween", "christmas", "winter", "summer", "spring", "fall", "autumn", "season", "event", "testing", "test", "what", "who", "how", "why", "can", "will", "not", "this", "that", "out", "off", "from", "into", "over", "under", "rp"]);
 
 /* ---------- Cópias recentes ---------- */
 function pageCopies() {
@@ -1115,7 +1118,7 @@ function pageHooks() {
   withFN(() => {
     const sort = store.get("sd-hk-sort", "opp");
     const W = FN.tokens?.words || {};
-    const rows = S.words.filter((w) => w.games.length >= 3).map((w) => {
+    const rows = S.words.filter((w) => w.games.length >= 3 && !HOOK_STOP.has(w.w) && w.w.length >= 3).map((w) => {
       const t = W[w.w] || [0, 0, 0, 0];
       const score = Math.log10(Math.max(w.playing, 10)) * (1 + Math.max(-0.5, Math.min(2, w.d1 ?? 0))) * (1 + Math.min(10, w.newCount) / 4) / Math.log10(10 + t[2]);
       return { w, fn: { count: t[0], alive: t[1], ccu: t[2], fresh: t[3] }, score };
@@ -1242,8 +1245,8 @@ function pageMap(code) {
         <div><small>Retenção D1</small><b>${x.ret1 == null ? "—" : Math.round(x.ret1 * 100) + "%"}</b></div>
         <div><small>Favoritos 24h</small><b>${x.fav24 == null ? "—" : K(x.fav24)}</b></div>
       </div>
-      ${rb.length ? `<div class="sec"><div class="sec-h"><h2>Jogo do Roblox com esse nome</h2></div><div class="card"><div class="rows">${rb.map((g) => rowGame(g, `${age(g.created)} · ${esc(genre(g.genre))}`, `${K(g.playing)}<small><a href="#/lado/${g.id}">lado a lado →</a></small>`)).join("")}</div></div></div>` : ""}`,
-    { rail: `${more.length ? card(`Mais de ${esc(x.creator)}`, "", null, `<div class="rows">${more.map((y) => `<a class="r" href="${fnl(y.code)}">${fnTile(y)}<span class="t"><span class="nm">${esc(y.title)}</span><span class="sb">${fnSub(y)}</span></span><span class="v">${K(y.now)}${chg(y.d1)}</span></a>`).join("")}</div>`) : ""}${same.length ? card("Mesmo gênero", "", null, `<div class="rows">${same.map((y) => `<a class="r" href="${fnl(y.code)}">${fnTile(y)}<span class="t"><span class="nm">${esc(y.title)}</span><span class="sb">${esc(y.creator)}</span></span><span class="v">${K(y.now)}${chg(y.d1)}</span></a>`).join("")}</div>`) : ""}` || card("Fortnite", "", "#/fortnite", empty("Sem mais mapas medidos deste criador.")) });
+      ${rb.length ? `<div class="sec"><div class="sec-h"><h2>Jogo do Roblox com esse nome</h2></div><div class="card"><div class="rows">${rb.map((g) => `<a class="r" href="#/lado/${g.id}">${icon(g)}<span class="t"><span class="nm">${esc(g.name)}</span><span class="sb">${age(g.created)} · ${esc(genre(g.genre))} · ver lado a lado</span></span><span class="v">${K(g.playing)}${chg(g.d1 ?? g.d1h)}</span></a>`).join("")}</div></div></div>` : ""}`,
+    { rail: `${more.length ? card(`Mais de ${esc(x.creator)}`, "", null, `<div class="rows">${more.map((y) => `<a class="r" href="${fnl(y.code)}">${fnTile(y)}<span class="t"><span class="nm">${esc(y.title)}</span><span class="sb">${fnSub(y)}</span></span><span class="v">${K(y.now)}${chg(y.d1)}</span></a>`).join("")}</div>`) : ""}${same.length ? card("Mesmo gênero", "", null, `<div class="rows">${same.map((y) => `<a class="r" href="${fnl(y.code)}">${fnTile(y)}<span class="t"><span class="nm">${esc(y.title)}</span><span class="sb">${esc(y.creator)}</span></span><span class="v">${K(y.now)}${chg(y.d1)}</span></a>`).join("")}</div>`) : ""}` });
     $view.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Código copiado"); } catch { toast(b.dataset.copy); } }));
     afterRender();
     let range = store.get("sd-map-range", "1d"), metric = "peakCCU";
@@ -1282,7 +1285,7 @@ function gameFnBox(g) {
     const f = fnFor(g);
     h.innerHTML = `<div class="sec"><div class="sec-h"><h2>No Fortnite</h2><a class="see" href="#/lado/${g.id}">Lado a lado</a></div>
       <div class="fn-sum">${fnBadge(f, { long: true })}<span class="oppw">Oportunidade ${oppBar(opportunity(g, f))}</span></div>
-      <div class="rows">${f.all.slice(0, 4).map((x) => `<a class="r" href="${fnl(x.code)}">${fnTile(x)}<span class="t"><span class="nm">${esc(x.title)}</span><span class="sb">${esc(x.creator)} · ${x.score >= 0.85 ? "mesmo nome" : x.score >= 0.6 ? "quase igual" : "parecido"}</span></span><span class="v">${x.now == null ? "—" : K(x.now)}<small>jogando</small></span></a>`).join("")}</div></div>`;
+      <div class="rows">${f.all.slice(0, 4).map((x) => `<a class="r" href="${fnl(x.code)}">${fnTile(x)}<span class="t"><span class="nm">${esc(x.title)}</span><span class="sb">${esc(x.creator)} · ${fnLabel(x.score).toLowerCase()}</span></span><span class="v">${x.now == null ? "—" : K(x.now)}<small>jogando</small></span></a>`).join("")}</div></div>`;
   }).catch(() => {});
 }
 // palavras: mapas do Fortnite com a mesma palavra
