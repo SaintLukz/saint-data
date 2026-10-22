@@ -320,9 +320,17 @@ function homeDelta() {
   const h = nearest(a, S.data.slot - HOUR, 10 * MIN);
   return h ? { v: h.y, l: "na última hora" } : null;
 }
+// variação comparando os mesmos jogos (quem entrou no top agora não infla o número)
+function likeForLike(key) {
+  let now = 0, before = 0;
+  for (const g of S.data.games) if (g[key] != null) { now += g.playing; before += g.playing / (1 + g[key]); }
+  return before > 0 ? { v: before, now } : null;
+}
 function pageHome() {
   const G = S.data.games;
-  const ref = homeDelta(), delta = ref ? S.data.total - ref.v : null;
+  const lf = likeForLike("d1"), lh = likeForLike("d1h");
+  const ref = lf && lf.now > S.data.total * 0.7 ? { v: lf.v, now: lf.now, l: "nas últimas 24h" } : lh ? { v: lh.v, now: lh.now, l: "na última hora" } : null;
+  const delta = ref ? ref.now - ref.v : null;
   let bo = breakingOut(), boLabel = "";
   if (bo.length < 5) { bo = breakingOutFallback(); boLabel = "última hora"; }
   const highs = newHighs().sort((a, b) => b.playing - a.playing);

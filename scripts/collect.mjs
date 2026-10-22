@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
 const PREV = process.env.PREV || "prev";
 const OUT = process.env.OUT || "out";
 const FAST = !!process.env.FAST; // só para testes locais (sem pausas)
-const MAX_GAMES = Number(process.env.MAX_GAMES || 3000);
+const MAX_GAMES = Number(process.env.MAX_GAMES || 5000);
 const TRACK_LIMIT = MAX_GAMES * 2, TRACK_DAYS = 14, EXTRA_TOP = 300, SHARDS = 32;
 const MIN = 60e3, STEP = 10 * MIN, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const FINE_SLOTS = 150, TOTAL_FINE = 7 * 144 + 6, GAME_HOURS = 24 * 14, TOTAL_HOURS = 24 * 90, VIS_HOURS = 50, GAME_DAYS = 365, TOTAL_DAYS = 730;
@@ -97,9 +97,9 @@ async function discover(state) {
     cur.sorts.add(sortId); found.set(g.universeId, cur);
   };
   const pairs = DEVICES.flatMap((d) => COUNTRIES.map((c) => [d, c])).filter(([d, c]) => !(d === "computer" && c === "all"));
-  const per = Math.ceil(pairs.length / 4), start = ((state.cursor ?? 0) * per) % pairs.length;
+  const per = Math.ceil(pairs.length / 2), start = ((state.cursor ?? 0) * per) % pairs.length;
   const batch = [["computer", "all"], ...pairs.slice(start, start + per)];
-  state.cursor = ((state.cursor ?? 0) + 1) % 4;
+  state.cursor = ((state.cursor ?? 0) + 1) % 2;
   await pool(batch, 4, async ([device, country]) => {
     const sid = randomUUID();
     const j = await getJSON(`https://apis.roblox.com/explore-api/v1/get-sorts?sessionId=${sid}&device=${device}&country=${country}`);
@@ -115,7 +115,7 @@ async function discover(state) {
     if (j?.games?.length) ranks[sortId] = j.games.map((g) => g.universeId);
   });
   // busca: um lote diferente de palavras a cada execução completa
-  const words = [...new Set(SEED_WORDS)], n = 24, ws = ((state.wordCursor ?? 0) * n) % words.length;
+  const words = [...new Set(SEED_WORDS)], n = 40, ws = ((state.wordCursor ?? 0) * n) % words.length;
   state.wordCursor = (state.wordCursor ?? 0) + 1;
   const searched = new Set();
   await pool(Array.from({ length: n }, (_, i) => words[(ws + i) % words.length]), 4, async (q) => {
