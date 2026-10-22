@@ -142,25 +142,40 @@ async function main() {
   const post = new Map();
   cores.forEach((c, i) => { for (const w of c) { let p = post.get(w); if (!p) post.set(w, (p = [])); p.push(i); } });
   const matches = {}; // rid -> { n, list: [[idx, score]] }
-  for (const g of rbx) {
-    const c = core(g.name);
-    if (!c.length) continue;
+  const matchCore = (c) => {
     const byRare = c.slice().sort((a, b) => idf(b) - idf(a));
     const p0 = post.get(byRare[0]) || [];
-    if (p0.length > 25000) { matches[g.id] = { n: null, generic: true, list: [] }; continue; } // nome genérico demais ("1v1", "tycoon")
+    if (p0.length > 25000) return null; // nome genérico demais ("1v1", "tycoon")
     const cand = new Set(p0);
     if (byRare[1] && c.length >= 3) for (const i of post.get(byRare[1]) || []) if (cand.size < 40000) cand.add(i);
     const wA = c.reduce((s, w) => s + idf(w), 0);
-    const list = [];
+    const out = new Map();
     for (const i of cand) {
       const f = cores[i];
       let inter = 0, extra = 0;
       for (const w of c) if (f.includes(w)) inter += idf(w);
       for (const w of f) if (!c.includes(w)) extra += idf(w);
-      const cov = inter / wA;
-      if (cov < (c.length >= 3 ? 0.7 : 0.99)) continue;
-      list.push([i, Math.round((inter / (wA + extra * 0.5)) * 100) / 100]);
+      if (inter / wA < (c.length >= 3 ? 0.7 : 0.99)) continue;
+      out.set(i, Math.round((inter / (wA + extra * 0.5)) * 100) / 100);
     }
+    return out;
+  };
+  for (const g of rbx) {
+    // o nome todo e, se houver, só a parte antes de "|", " - " ou ":" ("+1 Speed Keyboard Escape | Candy & Chocolate")
+    const variants = [core(g.name)];
+    const main = String(g.name).split(/\s*:\s|\s[|\-–—]\s|[|]/)[0];
+    if (main !== g.name) { const c2 = core(main); if (c2.length && c2.join() !== variants[0].join()) variants.push(c2); }
+    let generic = true; const merged = new Map();
+    for (const c of variants) {
+      if (!c.length) continue;
+      const m = matchCore(c);
+      if (!m) continue;
+      generic = false;
+      for (const [i, sc] of m) if (!(merged.get(i) >= sc)) merged.set(i, sc);
+    }
+    if (!variants[0].length && variants.length === 1) continue;
+    if (generic) { matches[g.id] = { n: null, generic: true, list: [] }; continue; }
+    const list = [...merged];
     matches[g.id] = { n: list.length, list };
   }
 
