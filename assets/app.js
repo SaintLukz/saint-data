@@ -904,16 +904,137 @@ function fnBadge(f, { long = false } = {}) {
   const cls = f.bestNow >= 1000 ? "down" : f.bestNow >= 100 ? "warn" : "";
   return `<span class="chip ${cls}">${nfInt.format(f.sameN)} ${f.sameN === 1 ? "cópia" : "cópias"}</span><small>${f.bestNow ? `maior com ${K(f.bestNow)} jogando` : "nenhuma com jogadores"}</small>`;
 }
-const MINER_TABS = [["minerar", "Minerar", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5C6 4.5 10.5 3.2 15 4.5 12 4.8 9 6.3 6.8 8.8"/><path d="m9.6 6.9 6.9 9.6"/></svg>'], ["copias", "Cópias recentes", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6.5" y="6.5" width="10" height="10" rx="2"/><path d="M13.5 6.5V5A1.5 1.5 0 0 0 12 3.5H5A1.5 1.5 0 0 0 3.5 5v7A1.5 1.5 0 0 0 5 13.5h1.5"/></svg>'], ["ganchos", "Ganchos", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v7.5a4 4 0 0 1-8 0V9"/><path d="m2.5 10.5 1.5-1.5 1.5 1.5"/><circle cx="12" cy="3" r="0.4"/></svg>'], ["fortnite", "Top Fortnite", TAB_ICONS.rankings], ["novos", "Novos no Fortnite", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 3v3M10 14v3M3 10h3M14 10h3M5 5l2 2M13 13l2 2M5 15l2-2M13 7l2-2"/></svg>'], ["ideias", "Ideias", I.starO]];
-const MINER_HREF = { minerar: "#/minerar", copias: "#/minerar/copias", ganchos: "#/minerar/ganchos", fortnite: "#/fortnite", novos: "#/fortnite/novos", ideias: "#/minerar/ideias" };
-function minerOn() { const [a, b] = location.hash.replace(/^#\/?/, "").split("/"); if (a === "fortnite") return b === "novos" ? "novos" : "fortnite"; if (a === "minerar") return ["copias", "ganchos", "ideias"].includes(b) ? b : "minerar"; return ""; }
+const MINER_TABS = [["radar", "Radar", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="3.5"/><path d="M10 10l4.5-4.5"/></svg>'], ["lista", "Oportunidades", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5C6 4.5 10.5 3.2 15 4.5 12 4.8 9 6.3 6.8 8.8"/><path d="m9.6 6.9 6.9 9.6"/></svg>'], ["ganchos", "Ganchos", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v7.5a4 4 0 0 1-8 0V9"/><path d="m2.5 10.5 1.5-1.5 1.5 1.5"/></svg>'], ["fortnite", "Top Fortnite", TAB_ICONS.rankings], ["novos", "Novidades", '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 3v3M10 14v3M3 10h3M14 10h3M5 5l2 2M13 13l2 2M5 15l2-2M13 7l2-2"/></svg>'], ["ideias", "Ideias", I.starO]];
+const MINER_HREF = { radar: "#/minerar", lista: "#/minerar/lista", ganchos: "#/minerar/ganchos", fortnite: "#/fortnite", novos: "#/fortnite/novos", ideias: "#/minerar/ideias" };
+function minerOn() { const [a, b] = location.hash.replace(/^#\/?/, "").split("/"); if (a === "fortnite" || a === "mapa") return b === "novos" ? "novos" : "fortnite"; if (a === "lado") return "radar"; if (a === "minerar") return b === "copias" ? "novos" : ["lista", "ganchos", "ideias"].includes(b) ? b : "radar"; return ""; }
 const minerTabs = (on) => `<nav class="tabs" aria-label="Minerador">${MINER_TABS.map(([k, l, ic]) => `<a href="${MINER_HREF[k]}" class="${k === on ? "on" : ""}">${ic}${l}</a>`).join("")}</nav>`;
 function fnFrame(on, html, { rail = "" } = {}) {
   $view.innerHTML = `<div class="page${rail ? "" : " wide"} fade">${minerTabs(on)}<div class="col">${html}</div>${rail ? `<aside class="rail">${rail}</aside>` : ""}</div>`;
 }
 const stamp = () => (FN.top?.t ? `Fortnite atualizado ${ago(FN.top.t)}` : "");
 
-/* ---------- Minerar ---------- */
+/* ---------- Radar: em alta no Roblox × em alta no Fortnite × tendências ---------- */
+const RADAR_P = [["agora", "Mais jogados agora"], ["24h", "Subiram em 24h"], ["7d", "Subiram em 7 dias"]];
+const growOf = (x, p) => (p === "7d" ? x.w7 : x.d1 ?? (p === "24h" ? null : x.d1h));
+const rbxList = (p) => {
+  const G = S.data.games;
+  if (p === "agora") return G.slice();
+  if (p === "24h") return G.filter((g) => g.d1 != null && g.playing >= 2000 && g.playing / (1 + g.d1) >= 500).sort((a, b) => b.d1 - a.d1);
+  return G.filter((g) => g.w7 != null && g.playing >= 2000 && g.playing / (1 + g.w7) >= 500).sort((a, b) => b.w7 - a.w7);
+};
+const fnList = (p) => {
+  const L = (FN.top?.islands || []).filter((x) => x.creator !== "epic");
+  if (p === "agora") return L.slice().sort((a, b) => (b.now ?? 0) - (a.now ?? 0));
+  const ok = (x, gr) => gr != null && (x.now ?? 0) >= 200 && (x.peak24 ?? 0) / (1 + gr) >= 100;
+  if (p === "24h") return L.filter((x) => ok(x, x.d1)).sort((a, b) => b.d1 - a.d1);
+  return L.filter((x) => ok(x, x.w7)).sort((a, b) => b.w7 - a.w7);
+};
+// palavras do nome (mesma regra das Tendências)
+const nameWords = (t) => new Set((String(t).toLowerCase().match(/[\p{L}\p{N}+]{3,}|\+1/gu) || []).filter((w) => !STOP.has(w) && !/^\d+$/.test(w)));
+// soma comparando os mesmos jogos: quanto o grupo cresceu
+function groupGrowth(list, p, now = (x) => x.playing ?? x.now ?? 0) {
+  let a = 0, b = 0, all = 0;
+  for (const x of list) { const v = now(x), gr = growOf(x, p); all += v; if (gr != null && gr > -1) { a += v; b += v / (1 + gr); } }
+  return b > 0 && a >= all * 0.5 ? a / b - 1 : null;
+}
+function hookStats(p) {
+  const fnIdx = new Map();
+  for (const x of FN.top?.islands || []) for (const w of nameWords(x.title)) { const a = fnIdx.get(w) || []; a.push(x); fnIdx.set(w, a); }
+  return S.words.filter((w) => w.games.length >= 3 && !HOOK_STOP.has(w.w)).map((w) => {
+    const fnMaps = fnIdx.get(w.w) || [], t = FN.tokens?.words?.[w.w];
+    const fnNow = fnMaps.reduce((s, x) => s + (x.now ?? 0), 0);
+    const free = w.games.filter((g) => !existsFN(fnFor(g), "any"));
+    const rg = groupGrowth(w.games, p), fg = groupGrowth(fnMaps, p, (x) => x.now ?? 0);
+    // em alta = quantos jogadores a palavra ganhou (não só a porcentagem, para não premiar grupos minúsculos)
+    const momentum = p === "agora" ? w.playing * (1 + Math.min(10, w.newCount) / 4) : rg == null || rg < 0.03 || w.playing < 5000 ? -1 : (w.playing - w.playing / (1 + rg)) * (1 + Math.min(1, rg));
+    return { w, rg, fnMaps, fnNow, fnCount: t?.[0] ?? fnMaps.length, fg, free, momentum };
+  }).filter((h) => h.momentum > 0).sort((a, b) => b.momentum - a.momentum);
+}
+// veredito do jogo do Roblox contra a melhor cópia no Fortnite
+function verdict(g, f = fnFor(g)) {
+  if (f.generic) return { k: "gen", cls: "", t: "Nome genérico", d: "compare pelo gancho" };
+  if (!f.sameN) return { k: "free", cls: "up", t: "Ninguém fez", d: "livre no Fortnite" };
+  const best = f.same.slice().sort((a, b) => (b.now ?? 0) - (a.now ?? 0))[0], x = FN.byCode.get(best.code) || best;
+  const pk = Math.max(x.peak24 ?? 0, x.now ?? 0), share = g.playing ? pk / g.playing : 0;
+  const quick = x.avgMin != null && x.avgMin < 8 ? " · jogadores saem rápido" : "";
+  if (pk < 100) return { k: "dead", cls: "up", t: "Feito, mas ninguém joga", d: `${f.sameN} ${f.sameN === 1 ? "cópia" : "cópias"} sem público${quick}`, best: x };
+  if (pk < 1000) return { k: "weak", cls: "up", t: "Cópia fraca", d: `a melhor tem ${K(pk)} no pico${quick}`, best: x };
+  if (pk < 10000 && share < 0.05) return { k: "mid", cls: "warn", t: "Dá pra fazer melhor", d: `a melhor tem ${K(pk)}, ${pctTxt(share)} do Roblox${quick}`, best: x };
+  return { k: "strong", cls: "down", t: "Já tem cópia forte", d: `a melhor tem ${K(pk)} no pico`, best: x };
+}
+const growChip = (v, p) => (v == null ? `<span class="muted">${p === "7d" ? "sem 7 dias ainda" : "—"}</span>` : chg(v));
+function radarRows(list, p, side, n) {
+  return list.slice(0, n).map((x, i) => {
+    const gr = growOf(x, p), spark = p === "7d" ? x.spark7 || [] : side === "r" ? x.spark || [] : (x.spark || []).slice(-24);
+    if (side === "r") return `<a class="r rk rad" href="#/lado/${x.id}">${rankBadge(i + 1)}${icon(x)}<span class="t"><span class="nm">${esc(x.name)}</span><span class="sb">${age(x.created)} · ${esc(genre(x.genre))}</span></span><span class="sp">${sparkline(spark, 64, 22)}</span><span class="v">${K(x.playing)}${gr == null ? "" : chg(gr)}</span></a>`;
+    return `<a class="r rk rad" href="${fnl(x.code)}">${rankBadge(i + 1)}${fnTile(x)}<span class="t"><span class="nm">${esc(x.title)}</span><span class="sb">${fnSub(x)}${x.rbx?.length ? ' · <span class="chip rbx">do Roblox</span>' : ""}</span></span><span class="sp">${sparkline(spark, 64, 22)}</span><span class="v">${K(x.now)}${gr == null ? "" : chg(gr)}</span></a>`;
+  }).join("") || empty(p === "7d" ? "Ainda não há 7 dias de histórico para comparar. Esta lista enche sozinha nos próximos dias." : "Nada por aqui ainda.");
+}
+function pageRadar() {
+  withFN(() => {
+    let p = store.get("sd-radar-p", "24h"), n = 10;
+    const RT = S.data.total, FT = FN.top?.total;
+    fnFrame("radar", `
+      <div class="page-h"><div><h1>Radar</h1><p>O que está bombando no Roblox e no Fortnite, quais tendências estão subindo e o que ainda dá para fazer. ${stamp()}</p></div></div>
+      <div class="duo2">
+        <div class="kpi rbx"><span class="chip rbx">Roblox</span><b>${words(RT)}</b><small>jogando nos ${nfInt.format(S.data.games.length)} maiores jogos</small></div>
+        <div class="kpi fn"><span class="chip fn">Fortnite</span><b>${FT?.inMatch ? words(FT.inMatch) : "—"}</b><small>em partida agora ${FT?.d1 != null ? chg(FT.d1) : ""}</small></div>
+      </div>
+      <div class="seg big" id="rp">${RADAR_P.map(([k, l]) => `<button type="button" data-k="${k}" class="${k === p ? "on" : ""}">${l}</button>`).join("")}</div>
+      <div class="vs rad-lists">
+        <section class="card"><div class="card-h"><h3><span class="chip rbx">Roblox</span><span id="rt1"></span></h3><a class="see" href="#/minerar/lista">Ver todos</a></div><div class="rows" id="rl"></div></section>
+        <section class="card"><div class="card-h"><h3><span class="chip fn">Fortnite</span><span id="rt2"></span></h3><a class="see" href="#/fortnite">Ver todos</a></div><div class="rows" id="fl"></div></section>
+      </div>
+      <button class="more-btn" type="button" id="rmore">Mostrar mais</button>
+      <div class="sec"><div class="sec-h"><h2>Tendências do momento</h2><span class="muted" id="rhs"></span></div><div class="hooks" id="rh"></div></div>
+      <div id="rd"></div>`);
+    let hooks = [], sel = store.get("sd-radar-hook", "");
+    const draw = () => {
+      const lab = RADAR_P.find((x) => x[0] === p)[1].toLowerCase();
+      const wd = Math.max(0, ...S.data.games.map((g) => g.w7days ?? 0));
+      document.getElementById("rt1").textContent = p === "7d" && wd && wd < 7 ? `subiram em ${wd} dias (ainda não há 7 dias de histórico)` : lab; document.getElementById("rt2").textContent = lab;
+      document.getElementById("rl").innerHTML = radarRows(rbxList(p), p, "r", n);
+      document.getElementById("fl").innerHTML = radarRows(fnList(p), p, "f", n);
+      hooks = hookStats(p);
+      if (!hooks.some((h) => h.w.w === sel)) sel = hooks[0]?.w.w || "";
+      document.getElementById("rhs").textContent = p === "agora" ? "palavras com mais gente e mais jogos novos no Roblox" : `palavras que mais ganharam jogadores no Roblox (${p === "24h" ? "24 horas" : "7 dias"})`;
+      document.getElementById("rh").innerHTML = hooks.slice(0, 10).map((h) => `<button type="button" class="hook ${h.w.w === sel ? "on" : ""}" data-w="${esc(h.w.w)}">
+        <span class="hk-t">${stack(h.w.games)}<b>${esc(h.w.label)}</b></span>
+        <span class="hk-r"><i class="dot rbx"></i>${K(h.w.playing)} ${h.rg != null ? chg(h.rg) : ""}<small>${h.w.games.length} jogos</small></span>
+        <span class="hk-r"><i class="dot fn"></i>${K(h.fnNow)} ${h.fg != null ? chg(h.fg) : ""}<small>${nfInt.format(h.fnCount)} mapas</small></span>
+        <span class="chip ${h.free.length ? "up" : ""}">${h.free.length ? `${h.free.length} ainda não ${h.free.length === 1 ? "feito" : "feitos"}` : "todos já feitos"}</span></button>`).join("") || empty(p === "7d" ? "Ainda não há 7 dias de histórico." : "Sem tendências agora.");
+      document.querySelectorAll("#rh .hook").forEach((b) => b.addEventListener("click", () => { sel = b.dataset.w; store.set("sd-radar-hook", sel); document.querySelectorAll("#rh .hook").forEach((x) => x.classList.toggle("on", x === b)); drawHook(); document.getElementById("rd").scrollIntoView({ behavior: "smooth", block: "start" }); }));
+      drawHook();
+    };
+    const drawHook = () => {
+      const h = hooks.find((x) => x.w.w === sel), box = document.getElementById("rd");
+      if (!h) { box.innerHTML = ""; return; }
+      const ign = prefSet("sd-fn-ign"), ids = ideas();
+      const games = h.w.games.filter((g) => !ign.has(g.id)).map((g) => ({ g, f: fnFor(g) })).map((x) => ({ ...x, v: verdict(x.g, x.f), s: opportunity(x.g, x.f) }));
+      const free = games.filter((x) => x.v.k === "free" || x.v.k === "gen").sort((a, b) => b.s - a.s);
+      const made = games.filter((x) => x.v.k !== "free" && x.v.k !== "gen").sort((a, b) => ["dead", "weak", "mid", "strong"].indexOf(a.v.k) - ["dead", "weak", "mid", "strong"].indexOf(b.v.k) || b.g.playing - a.g.playing);
+      const gr = h.rg != null ? ` (${pctTxt(Math.abs(h.rg))} ${h.rg >= 0 ? "a mais" : "a menos"} ${p === "7d" ? "que há 7 dias" : "que ontem"})` : "";
+      box.innerHTML = `<div class="hook-d">
+        <div class="hook-h"><div>${stack(h.w.games)}<h2>Tendência “${esc(h.w.label)}”</h2></div><a class="see" href="#/tendencias/${encodeURIComponent(h.w.w)}">Ver todos os jogos</a></div>
+        <p class="hook-s">No Roblox, <b>${h.w.games.length} jogos</b> com “${esc(h.w.label)}” somam <b>${words(h.w.playing)} jogando</b>${gr}. No Fortnite, <b>${nfInt.format(h.fnCount)} mapas</b> usam a palavra e <b>${words(h.fnNow)}</b> estão jogando neles agora. <b>${free.length}</b> desses jogos ainda não existem no Fortnite.</p>
+        <div class="sec-h"><h3>Ainda não feitos no Fortnite <span class="chip up">${free.length}</span></h3></div>
+        <div class="free-grid">${free.slice(0, 12).map(({ g, s, v }) => `<a class="fcard" href="#/lado/${g.id}">${icon(g, "ic lg")}<b>${esc(g.name)}</b><small>${age(g.created)} · ${esc(genre(g.genre))}</small><span class="fc-n">${K(g.playing)} ${chg(growOf(g, p) ?? g.d1 ?? g.d1h)}</span><span class="fc-b">${oppBar(s)}${v.k === "gen" ? '<span class="chip">nome genérico</span>' : ""}</span><button type="button" class="act ${ids[g.id] ? "on" : ""}" data-idea="${g.id}" title="Salvar ideia" aria-label="Salvar ideia">${I.star(!!ids[g.id])}</button></a>`).join("") || empty("Todos os jogos dessa tendência já têm versão no Fortnite. Veja abaixo se as cópias estão bem feitas.")}</div>
+        <div class="sec-h" style="margin-top:22px"><h3>Já feitos no Fortnite: compare o desempenho <span class="chip">${made.length}</span></h3></div>
+        <div class="cmp-list">${made.slice(0, 15).map(({ g, v }) => { const b = v.best || {}; const pk = Math.max(b.peak24 ?? 0, b.now ?? 0); const share = g.playing ? Math.min(1, pk / g.playing) : 0; return `<a class="cmp" href="#/lado/${g.id}">
+          <span class="cmp-s">${icon(g)}<span class="t"><span class="nm">${esc(g.name)}</span><span class="sb"><i class="dot rbx"></i>${K(g.playing)} jogando ${chg(growOf(g, p) ?? g.d1)}</span></span></span>
+          <span class="cmp-m"><span class="bar2"><i class="r" style="width:100%"></i><i class="f" style="width:${Math.max(1.5, share * 100)}%"></i></span><small>Fortnite tem ${share < 0.001 ? "menos de 0,1%" : pctTxt(share)} do público</small></span>
+          <span class="cmp-s">${fnTile(b)}<span class="t"><span class="nm">${esc(b.title || "")}</span><span class="sb"><i class="dot fn"></i>${b.now == null ? "não medido" : `${K(b.now)} jogando`}${b.avgMin ? ` · ${nf(b.avgMin, 0)} min` : ""}</span></span></span>
+          <span class="cmp-v"><span class="chip ${v.cls}">${v.t}</span><small>${esc(v.d)}</small></span></a>`; }).join("") || empty("Nenhum jogo dessa tendência foi feito no Fortnite ainda.")}</div></div>`;
+      box.querySelectorAll("[data-idea]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); const g = S.byId.get(Number(b.dataset.idea)); const had = !!ideas()[g.id]; setIdea(g, had ? null : {}); toast(had ? "Ideia removida" : "Salvo em Ideias"); b.classList.toggle("on", !had); b.innerHTML = I.star(!had); if (!had) b.querySelector("svg").classList.add("pop"); }));
+    };
+    document.querySelectorAll("#rp button").forEach((b) => b.addEventListener("click", () => { p = b.dataset.k; store.set("sd-radar-p", p); document.querySelectorAll("#rp button").forEach((x) => x.classList.toggle("on", x === b)); slide(document.getElementById("rp")); draw(); }));
+    document.getElementById("rmore").addEventListener("click", (e) => { n = n === 10 ? 30 : 10; e.currentTarget.textContent = n === 10 ? "Mostrar mais" : "Mostrar menos"; draw(); });
+    draw();
+    slide(document.getElementById("rp"));
+  });
+}
+
+/* ---------- Minerar (lista completa de oportunidades) ---------- */
 const MINE_SRC = [["", "Todos"], ["disparando", "Disparando"], ["novos", "Novos (30 dias)"], ["recordes", "Recordes de hoje"], ["top", "Top 300"]];
 const MINE_SORT = [["opp", "Oportunidade"], ["playing", "Jogadores"], ["d1", "Crescimento 24h"], ["age", "Mais novos"]];
 const MINE_MIN = [["0", "Qualquer tamanho"], ["500", "500+ jogando"], ["1000", "1K+ jogando"], ["5000", "5K+ jogando"], ["20000", "20K+ jogando"]];
@@ -923,11 +1044,12 @@ function pageMine(tab = "") {
   if (tab === "copias") return pageCopies();
   if (tab === "ganchos") return pageHooks();
   if (tab === "ideias") return pageIdeas();
+  if (tab !== "lista") return pageRadar();
   withFN(() => {
     const P = { ...MINE_DEF, ...store.get("sd-mine", {}) };
     const savePrefs = () => store.set("sd-mine", P);
-    fnFrame("minerar", `
-      <div class="page-h"><div><h1>Minerador</h1><p>Jogos do Roblox que estão em alta, lado a lado com o que já existe no Fortnite. ${stamp()}</p></div></div>
+    fnFrame("lista", `
+      <div class="page-h"><div><h1>Oportunidades</h1><p>Todos os jogos do top do Roblox com a nota de oportunidade e o que já existe no Fortnite. ${stamp()}</p></div></div>
       <div class="mine-bar">
         <div class="seg" id="msrc">${MINE_SRC.map(([k, l]) => `<button type="button" data-k="${k}" class="${k === P.src ? "on" : ""}">${l}</button>`).join("")}</div>
         <div class="mine-f">
@@ -1001,7 +1123,25 @@ function pageSide(rid) {
     const lead = f.same[0] || f.all[0] || null;
     const label = fnLabel;
     const after = (iso) => iso && FN.top?.baseline && iso > FN.top.baseline;
-    fnFrame("minerar", `
+    const v = verdict(g, f), bx = v.best ? FN.byCode.get(v.best.code) || v.best : lead ? FN.byCode.get(lead.code) || lead : null;
+    const share = bx && g.playing ? Math.max(bx.peak24 ?? 0, bx.now ?? 0) / g.playing : 0;
+    const vText = v.k === "free" ? `Pelo nome, ninguém publicou esse jogo no Fortnite. No Roblox ele tem <b>${words(g.playing)} jogando</b>${g.d1 != null ? ` (${g.d1 >= 0 ? "+" : ""}${pctTxt(g.d1)} em 24h)` : ""}. Boa hora para sair na frente.`
+      : v.k === "gen" ? "O nome é comum demais para comparar só pelo nome. Use a lista abaixo e os ganchos para ver a concorrência."
+      : v.k === "strong" ? `Já existe uma versão forte no Fortnite: <b>${esc(bx?.title ?? "")}</b> chegou a <b>${K(Math.max(bx?.peak24 ?? 0, bx?.now ?? 0))}</b> jogando nas últimas 24h. Só vale a pena com um diferencial claro.`
+      : `A melhor versão no Fortnite, <b>${esc(bx?.title ?? "")}</b>, teve <b>${K(Math.max(bx?.peak24 ?? 0, bx?.now ?? 0))}</b> no pico das últimas 24h, ${share < 0.001 ? "menos de 0,1%" : pctTxt(share)} do público do Roblox.${bx?.avgMin != null && g.avgVisitMin ? ` Quem joga fica <b>${nf(bx.avgMin, 0)} min</b> em média (no Roblox, ${nfInt.format(g.avgVisitMin)} min).` : ""} Ainda dá para fazer uma versão melhor.`;
+    const xr = (l, a, b2) => `<tr><td class="l">${l}</td><td>${a}</td><td>${b2}</td></tr>`;
+    const xray = `<div class="verdict v-${v.cls || "none"}"><span class="chip ${v.cls}">${v.t}</span><p>${vText}</p></div>
+      <div class="card xray"><table class="tbl xr"><thead><tr><th class="l">Raio-X</th><th><span class="chip rbx">Roblox</span></th><th><span class="chip fn">Fortnite${bx ? " · melhor cópia" : ""}</span></th></tr></thead><tbody>
+        ${xr("Jogando agora", nfInt.format(g.playing), bx?.now == null ? "—" : nfInt.format(bx.now))}
+        ${xr("Pico nas últimas 24h", K(g.high24 ?? g.playing), bx?.peak24 == null ? "—" : K(bx.peak24))}
+        ${xr("Crescimento em 24h", chg(g.d1 ?? g.d1h), bx ? chg(bx.d1) : "—")}
+        ${xr("Crescimento em 7 dias", growChip(g.w7, "7d"), bx ? growChip(bx.w7, "7d") : "—")}
+        ${xr("Tempo médio por jogador", g.avgVisitMin ? `${nfInt.format(g.avgVisitMin)} min` : "—", bx?.avgMin != null ? `${nf(bx.avgMin, 0)} min` : "—")}
+        ${xr("Visitas / partidas em 24h", g.dailyVisits ? K(g.dailyVisits) : "—", bx?.plays24 != null ? K(bx.plays24) : "—")}
+        ${xr("Volta no dia seguinte", "—", bx?.ret1 != null ? Math.round(bx.ret1 * 100) + "%" : "—")}
+        ${xr("Mapas com esse nome no Fortnite", "", nfInt.format(f.sameN))}
+      </tbody></table></div>`;
+    fnFrame("radar", `
       <div class="page-h"><a class="pill-btn icon" href="#/minerar" aria-label="Voltar">${I.back}</a><div><h1>Roblox × Fortnite</h1><p>${esc(g.name)} e o que já existe com esse nome no Fortnite.</p></div></div>
       <div class="vs">
         <div class="card vs-c"><div class="vs-h">${icon(g, "ic lg")}<div><span class="chip rbx">Roblox</span><h2><a href="${gl(g)}">${esc(g.name)}</a></h2><small>${esc(g.creator)} · ${age(g.created)} · ${esc(genre(g.genre))}</small></div></div>
@@ -1014,6 +1154,7 @@ function pageSide(rid) {
           <div class="vs-a"><a class="pill-btn" href="${fnl(lead.code)}">Ver mapa</a><button class="pill-btn" type="button" data-copy="${lead.code}">${lead.code}</button></div>`
           : `<div class="vs-free"><span class="chip up">Livre no Fortnite</span><h2>${f.generic ? "Nome comum demais para comparar" : "Ninguém publicou esse jogo no Fortnite"}</h2><p>${f.generic ? "Esse nome tem palavras muito usadas. Veja os ganchos para entender a concorrência." : "Pelo nome, não há nenhum mapa igual entre os ~280 mil mapas públicos do Fortnite. Boa hora para sair na frente."}</p></div>`}</div>
       </div>
+      ${xray}
       <section class="hero" style="margin-top:16px"><div class="chart" id="vc"><div class="chart-empty loading" style="height:260px"><span>Carregando gráficos…</span></div></div>
         <div class="chart-bar"><div class="seg" id="vr"></div><div class="seg" id="vm"></div></div>
         <div class="legend" id="vl"></div></section>
@@ -1107,7 +1248,7 @@ function pageCopies() {
     const min = Number(store.get("sd-cp-min", "1000"));
     const list = (FN.copies?.copies || []).map((c) => ({ ...c, g: S.byId.get(c.rid) })).filter((c) => c.g && c.g.playing >= min);
     const base = FN.copies?.baseline;
-    fnFrame("copias", `
+    fnFrame("novos", `
       <div class="page-h"><div><h1>Cópias recentes</h1><p>Mapas que acabaram de aparecer no Fortnite com o nome de um jogo do top do Roblox. Mostra quem chegou primeiro.</p></div><div class="dd" id="cpmin" style="margin-left:auto"></div></div>
       ${base ? `<p class="note" style="margin:-6px 2px 12px">Contando a partir de ${dhfmt.format(new Date(base))}, quando o Saint Data começou a olhar o Fortnite.</p>` : ""}
       <div class="card"><div class="feed">${list.slice(0, 200).map((c) => `<a class="ev" href="#/lado/${c.rid}">${fnTile(c)}<span class="tx"><span class="chip fn">Fortnite</span> <b>${esc(c.title)}</b> <span class="muted">por ${esc(c.creator)}</span> é cópia de ${icon(c.g, "ic xs")}<b>${esc(c.g.name)}</b> <span class="muted">(${K(c.g.playing)} jogando no Roblox)</span>${c.now ? ` · ${K(c.now)} jogando no Fortnite` : ""}</span><span class="when">${ago(c.at)}</span></a>`).join("") || empty("Nenhuma cópia nova ainda. A lista começa a encher conforme novos mapas aparecem no Fortnite (o catálogo é conferido de hora em hora).")}</div></div>`);
@@ -1216,8 +1357,10 @@ function pageFnNew() {
     const list = FN.news?.islands || [];
     const withPlayers = list.filter((x) => (x.now ?? 0) >= 1).sort((a, b) => b.now - a.now);
     const base = FN.news?.baseline;
+    const cps = (FN.copies?.copies || []).map((c) => ({ ...c, g: S.byId.get(c.rid) })).filter((c) => c.g && c.g.playing >= 1000);
     fnFrame("novos", `
-      <div class="page-h"><div><h1>Novos no Fortnite</h1><p>Mapas que apareceram nos últimos 7 dias${base ? ` (desde ${dhfmt.format(new Date(base))}, quando o monitoramento começou)` : ""}: ${nfInt.format(list.length)} no total, ${nfInt.format(withPlayers.length)} já com jogadores.</p></div></div>
+      <div class="page-h"><div><h1>Novidades no Fortnite</h1><p>Mapas que apareceram nos últimos 7 dias${base ? ` (desde ${dhfmt.format(new Date(base))}, quando o monitoramento começou)` : ""}: ${nfInt.format(list.length)} no total, ${nfInt.format(withPlayers.length)} já com jogadores.</p></div></div>
+      <div class="sec"><div class="sec-h"><h2>Cópias de jogos do Roblox que acabaram de sair</h2><a class="see" href="#/minerar/copias">Ver todas</a></div><div class="card"><div class="feed">${cps.slice(0, 8).map((c) => `<a class="ev" href="#/lado/${c.rid}">${fnTile(c)}<span class="tx"><b>${esc(c.title)}</b> <span class="muted">por ${esc(c.creator)}</span> copia ${icon(c.g, "ic xs")}<b>${esc(c.g.name)}</b> <span class="muted">(${K(c.g.playing)} no Roblox)</span></span><span class="when">${ago(c.at)}</span></a>`).join("") || empty("Nenhuma cópia nova de jogo grande do Roblox ainda.")}</div></div></div>
       <div class="sec"><div class="sec-h"><h2>Novos com mais jogadores</h2></div>${fnTable(withPlayers, { limit: 100 })}</div>
       <div class="sec"><div class="sec-h"><h2>Acabaram de sair</h2></div><div class="card"><div class="feed">${list.slice(0, 120).map((x) => `<a class="ev" href="${fnl(x.code)}">${fnTile(x)}<span class="tx"><b>${esc(x.title)}</b> <span class="muted">por ${esc(x.creator)}${x.tags?.length ? ` · ${esc(x.tags.slice(0, 3).join(", "))}` : ""}</span>${x.rbx?.length && S.byId.get(x.rbx[0]) ? ` · <span class="chip warn">cópia de ${esc(S.byId.get(x.rbx[0]).name)}</span>` : ""}</span><span class="when">${ago(x.firstSeen)}</span></a>`).join("") || empty("A lista começa a encher a partir da segunda coleta do Fortnite.")}</div></div></div>`);
     wireRows($view);

@@ -260,6 +260,13 @@ async function main() {
     const pk = Math.max(pm?.peak ?? 0, playing, ...(gf.d?.peak ?? []));
     const peakDate = pk === playing && playing > (pm?.peak ?? 0) ? today : pm?.peakDate ?? (gf.d ? gf.d.dates[gf.d.peak.indexOf(pk)] : today) ?? today;
     const sp = Array.from({ length: 48 }, (_, k) => near(fine, slot - (47 - k) * 3 * STEP, STEP, STEP));
+    // semana: pico das últimas 24h contra o pico do dia de 7 dias atrás (ou do dia mais antigo, se ainda não houver 7 dias)
+    const dd = gf.d?.dates ?? [], high = Math.max(playing, ...last24);
+    let wi = dd.indexOf(new Date(T - 7 * DAY - 3 * HOUR).toISOString().slice(0, 10));
+    if (wi < 0 && dd.length >= 4) wi = 0;
+    const wDays = wi >= 0 ? Math.round((new Date(today) - new Date(dd[wi])) / DAY) : null;
+    const w7 = wi >= 0 && wDays >= 3 ? pct(high, gf.d.peak[wi]) : null;
+    const spark7 = dd.length ? gf.d.peak.slice(-7) : [];
     const v = votes.get(id), meta = disc?.found.get(id);
     const lists = full ? Object.fromEntries(Object.keys(disc.ranks).map((s) => [s, rankOf(s, id)]).filter(([, r]) => r)) : pm?.lists ?? {};
     games.push({
@@ -277,6 +284,7 @@ async function main() {
       d1h: pct(playing, near(fine, slot - HOUR, STEP, STEP)),
       d1: pct(playing, near(fine, slot - DAY, 3 * STEP, STEP) ?? near(gf.h, hour - DAY, 2 * HOUR, HOUR)),
       d7: pct(playing, near(gf.h, hour - 7 * DAY, 3 * HOUR, HOUR)),
+      w7, w7days: w7 == null ? null : wDays, spark7,
       high24: Math.max(playing, ...last24), avg24: Math.round(avg24), peak: pk, peakDate,
       dailyVisits, avgVisitMin: dailyVisits > 0 ? Math.round((avg24 * 1440) / dailyVisits) : pm?.avgVisitMin ?? null,
       hasExtras: pm?.hasExtras || false, spark: sp,

@@ -91,17 +91,26 @@ async function prevCatalog() {
 // ---------- métricas de um mapa (últimas ~25h, por hora) ----------
 const vals = (a) => (a || []).map((x) => x?.value ?? null);
 const sum = (a) => a.reduce((s, x) => s + (x ?? 0), 0);
+// pico de cada janela de 24h, da mais antiga para a mais nova (as últimas 168 horas viram 7 janelas)
+function dayPeaks(ccu) {
+  const out = [];
+  for (let end = ccu.length; end > 0 && out.length < 7; end -= 24) { const w = ccu.slice(Math.max(0, end - 24), end).filter((x) => x != null); out.unshift(w.length ? Math.max(...w) : null); }
+  return out;
+}
+const grow = (a, b) => (a != null && b != null && b >= 5 ? a / b - 1 : null);
 function summarize(j) {
   const ccu = vals(j.peakCCU);
   const lastIdx = (() => { for (let i = ccu.length - 1; i >= Math.max(0, ccu.length - 3); i--) if (ccu[i] != null) return i; return -1; })();
   const now = lastIdx >= 0 ? ccu[lastIdx] : 0;
   const last24 = (a) => vals(a).slice(-24);
-  const peak24 = Math.max(0, ...ccu.filter((x) => x != null));
+  const peak24 = Math.max(0, ...ccu.slice(-24).filter((x) => x != null));
   const first = ccu.find((x) => x != null);
-  const ago = ccu.length >= 25 ? ccu[0] : null;
+  const ago = ccu.length >= 25 ? ccu[ccu.length - 25] : null;
   const min24 = sum(last24(j.minutesPlayed)), uniq24 = sum(last24(j.uniquePlayers));
+  const dp = dayPeaks(ccu.length >= 48 ? ccu : []);
   return {
-    now, peak24, d1: ago != null && ago > 0 ? now / ago - 1 : null,
+    now, peak24, d1: dp.length >= 2 ? grow(dp[dp.length - 1], dp[dp.length - 2]) : ago != null && ago > 0 ? now / ago - 1 : null,
+    w7: dp.length >= 7 ? grow(dp[6], dp[0]) : null, spark7: dp,
     plays24: sum(last24(j.plays)), min24, uniq24, fav24: sum(last24(j.favorites)), rec24: sum(last24(j.recommendations)),
     avgMin: uniq24 > 0 ? Math.round((min24 / uniq24) * 10) / 10 : null,
     spark: ccu.slice(-25), sparkT: j.peakCCU?.length ? j.peakCCU[Math.max(0, j.peakCCU.length - 25)].timestamp : null,
@@ -211,7 +220,7 @@ async function main() {
   const t0 = Date.now();
   await pool(queue, 3, async (code) => {
     if (Date.now() - t0 > METRICS_MS) return;
-    const j = await api(`/islands/${code}/metrics/hour`);
+    const j = await api(`/islands/${code}/metrics/hour?from=${iso(NOW - 7 * DAY + MIN)}&to=${iso(NOW)}`);
     if (!j) return;
     stats.metrics++;
     if (j.notFound) { known[code] = { now: 0, peak24: 0, at: NOW, alive: false }; delete info[code]; stats.dead++; return; }
@@ -258,7 +267,7 @@ async function main() {
       code, title: x?.title ?? "", creator: x?.creator ?? "", tags: x?.tags ?? [], createdIn: x?.createdIn ?? "", firstSeen: firstSeenISO(code),
       genres: ranked.get(code) || [], now: m?.now ?? (k ? k.now : null), peak24: m?.peak24 ?? k?.peak24 ?? null, d1: m?.d1 ?? null,
       plays24: m?.plays24 ?? null, min24: m?.min24 ?? null, uniq24: m?.uniq24 ?? null, fav24: m?.fav24 ?? null, rec24: m?.rec24 ?? null, avgMin: m?.avgMin ?? null,
-      ret1: m?.day?.ret1 ?? null, ret7: m?.day?.ret7 ?? null, peak7: m?.day?.peak7 ?? null, plays7: m?.day?.plays7 ?? null,
+      w7: m?.w7 ?? null, spark7: m?.spark7 ?? null, ret1: m?.day?.ret1 ?? null, ret7: m?.day?.ret7 ?? null, peak7: m?.day?.peak7 ?? null, plays7: m?.day?.plays7 ?? null,
       spark: m?.spark ?? null, sparkT: m?.sparkT ?? null, checked: k ? iso(k.at) : null, rbx: rbxByMatch.get(code) || [],
     };
   };
