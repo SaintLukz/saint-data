@@ -1,4 +1,4 @@
-// Saint Data — aplicativo de página única, sem dependências.
+// Saint Data — aplicativo de página única. Única dependência: number-flow (números que rolam), carregada da CDN.
 // Os dados vêm do ramo "dados" do repositório (atualizado a cada 10 minutos pelo coletor).
 
 const BASE = window.SD_DATA || "https://raw.githubusercontent.com/SaintLukz/saint-data/dados/";
@@ -69,7 +69,41 @@ const LISTS = [
 ];
 const listName = (s) => LISTS.find((l) => l[0] === s)?.[1] ?? s;
 let toastT;
-function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 2200); }
+function toast(msg) {
+  const t = document.getElementById("toast"); t.textContent = msg;
+  t.classList.remove("bump"); if (!t.hidden) { void t.offsetWidth; t.classList.add("bump"); }
+  t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 2200);
+}
+
+/* =========================================================== animações */
+// números que rolam dígito a dígito (number-flow). Sem a CDN, cai para texto simples.
+const FLOW_FMT = { int: {}, pct: { maximumFractionDigits: 1 } };
+let flowReady = false;
+import("https://cdn.jsdelivr.net/npm/number-flow@0.6.2/+esm").then(() => customElements.whenDefined("number-flow")).then(() => { flowReady = true; document.querySelectorAll("number-flow").forEach((el) => setFlow(el, Number(el.dataset.v), false)); }).catch(() => {});
+const flowPrev = new Map(); // último valor mostrado em cada número (para rolar do antigo ao novo depois de recarregar)
+function flowHTML(key, v, cls = "hero-num") { const from = flowPrev.has(key) ? flowPrev.get(key) : v; return `<number-flow class="${cls}" data-key="${key}" data-v="${from}" data-to="${v}">${nfInt.format(from)}</number-flow>`; }
+function setFlow(el, v, animated = true) {
+  if (!el || v == null || !isFinite(v)) return;
+  el.dataset.v = v; if (el.dataset.key && !el.dataset.hover) flowPrev.set(el.dataset.key, v);
+  if (flowReady && el.update) { el.locales = "pt-BR"; el.format = FLOW_FMT.int; el.animated = animated; el.update(Math.round(v)); }
+  else el.textContent = nfInt.format(Math.round(v));
+}
+// depois de montar a página: cada número rola do valor anterior até o atual
+function startFlows(root = $view) { root.querySelectorAll("number-flow[data-to]").forEach((el) => { const to = Number(el.dataset.to); delete el.dataset.to; setFlow(el, Number(el.dataset.v), false); requestAnimationFrame(() => setFlow(el, to)); }); }
+// indicador que desliza até o botão ativo (seletores de período, abas)
+const slideMem = new Map();
+function slide(host, sel = "button.on, a.on", key = host?.id) {
+  if (!host) return;
+  const on = host.querySelector(sel); let ind = host.querySelector(":scope > .ind");
+  if (!on) { ind?.remove(); return; }
+  if (!ind) { ind = document.createElement("span"); ind.className = "ind"; host.prepend(ind); }
+  host.classList.add("has-ind");
+  const to = { l: on.offsetLeft, t: on.offsetTop, w: on.offsetWidth, h: on.offsetHeight };
+  const from = key && slideMem.get(key);
+  const put = (p) => { ind.style.width = p.w + "px"; ind.style.height = p.h + "px"; ind.style.transform = `translate(${p.l}px,${p.t}px)`; };
+  if (from && (from.l !== to.l || from.w !== to.w)) { ind.style.transition = "none"; put(from); void ind.offsetWidth; ind.style.transition = ""; }
+  put(to); if (key) slideMem.set(key, to);
+}
 
 /* =========================================================== ícones e peças */
 const I = {
@@ -161,10 +195,11 @@ const sinceT = (arr, t) => arr.filter((p) => p.x >= t);
 function thin(arr, max) { if (arr.length <= max) return arr; const k = Math.ceil(arr.length / max); return arr.filter((_, i) => i % k === 0 || i === arr.length - 1); }
 function daily(d, key = "peak") { return (d?.dates || []).map((x, i) => ({ x: new Date(x + "T15:00:00Z").getTime(), y: d[key]?.[i] ?? null, day: true })); }
 
-// gráfico de linha suave com pico, ponto atual, cursor e várias séries (para comparar)
-function lineChart(box, series, { fmt = K, h = 250, peak = true, live = true, gapMax = 6, empty: emptyMsg } = {}) {
+// gráfico de linha suave com pico, ponto atual que "respira", cursor, trecho futuro apagado e várias séries (para comparar)
+// onHover(p | null): avisa quem usa o gráfico (o número grande acompanha o cursor)
+function lineChart(box, series, { fmt = K, h = 250, peak = true, live = true, gapMax = 6, empty: emptyMsg, onHover = null, anim = true } = {}) {
   const all = series.flatMap((s) => s.pts.filter((p) => p.y != null));
-  if (all.length < 2) { box.innerHTML = `<div class="chart-empty" style="height:${h - 20}px">${emptyMsg || "Ainda há poucos pontos neste período. O gráfico se completa a cada coleta (de 10 em 10 minutos)."}</div>`; return; }
+  if (all.length < 2) { box.innerHTML = `<div class="chart-empty" style="height:${h - 20}px">${emptyMsg || "Ainda há poucos pontos neste período. O gráfico se completa a cada coleta (de 10 em 10 minutos)."}</div>`; onHover?.(null); return; }
   const W = 720, H = h, pt = 30, pb = 8, pr = 14;
   const xs = all.map((p) => p.x), x0 = Math.min(...xs), x1 = Math.max(...xs);
   let lo = Math.min(...all.map((p) => p.y)), hi = Math.max(...all.map((p) => p.y));
@@ -174,44 +209,58 @@ function lineChart(box, series, { fmt = K, h = 250, peak = true, live = true, ga
   const Y = (y) => pt + (1 - (y - lo) / (hi - lo)) * (H - pt - pb);
   const gid = "g" + Math.random().toString(36).slice(2, 8);
   const c0 = series[0].color || "var(--accent)";
-  let body = "";
+  const one = series.length === 1;
+  let area = "", lines = "";
   const segsOf = (arr) => { const segs = []; let cur = [], gap = 0; for (const p of arr) { if (p.y == null) { gap++; if (gap > gapMax && cur.length) { segs.push(cur); cur = []; } continue; } gap = 0; cur.push([X(p.x), Y(p.y)]); } if (cur.length) segs.push(cur); return segs; };
   series.forEach((s) => {
     const color = s.color || "var(--accent)";
     for (const seg of segsOf(s.pts)) {
-      if (seg.length === 1) { body += `<circle cx="${seg[0][0]}" cy="${seg[0][1]}" r="2.5" fill="${color}"/>`; continue; }
+      if (seg.length === 1) { lines += `<circle cx="${seg[0][0]}" cy="${seg[0][1]}" r="2.5" fill="${color}"/>`; continue; }
       const d = smooth(seg);
-      if (series.length === 1) body += `<path d="${d}L${seg[seg.length - 1][0].toFixed(1)},${H}L${seg[0][0].toFixed(1)},${H}Z" fill="url(#${gid})"/>`;
-      body += `<path d="${d}" fill="none" stroke="${color}" stroke-width="${series.length > 1 ? 2 : 2.2}" stroke-linejoin="round" stroke-linecap="round"/>`;
+      if (one) area += `<path class="ar" d="${d}L${seg[seg.length - 1][0].toFixed(1)},${H}L${seg[0][0].toFixed(1)},${H}Z" fill="url(#${gid})"/>`;
+      lines += `<path class="ln" pathLength="1" d="${d}" fill="none" stroke="${color}" stroke-width="${one ? 2.2 : 2}" stroke-linejoin="round" stroke-linecap="round"/>`;
     }
   });
   const main = series[0].pts.filter((p) => p.y != null);
   const last = main[main.length - 1];
   let pk = main[0]; for (const p of main) if (p.y > pk.y) pk = p;
   const when = (p) => (p.day ? dfmt.format(new Date(p.x)) : x1 - x0 > 1.5 * DAY ? dhfmt.format(new Date(p.x)) : hfmt.format(new Date(p.x)));
-  if (peak && series.length === 1 && pk !== last) body += `<circle cx="${X(pk.x)}" cy="${Y(pk.y)}" r="3" fill="var(--fg)"/>`;
-  if (live && series.length === 1) body += `<circle class="pulse" cx="${X(last.x)}" cy="${Y(last.y)}" r="6" fill="${c0}"/><circle cx="${X(last.x)}" cy="${Y(last.y)}" r="4" fill="${c0}" stroke="var(--bg)" stroke-width="1.5"/>`;
-  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico"><defs><pattern id="d${gid}" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="var(--faint)"/></pattern><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c0}" stop-opacity=".2"/><stop offset="1" stop-color="${c0}" stop-opacity="0"/></linearGradient></defs><rect width="${W}" height="${H}" fill="url(#d${gid})"/>${body}<line class="hl" y1="${pt - 6}" y2="${H}" stroke="var(--muted)" stroke-dasharray="3 3" visibility="hidden"/><g class="hds"></g></svg><div class="tip"></div>`;
-  const svg = box.querySelector("svg"), tip = box.querySelector(".tip"), hl = svg.querySelector(".hl"), hds = svg.querySelector(".hds");
+  let marks = "";
+  if (peak && one && pk !== last) marks += `<circle class="pk" cx="${X(pk.x)}" cy="${Y(pk.y)}" r="3" fill="var(--fg)"/>`;
+  if (live && one) marks += `<g class="now"><circle class="pulse" cx="${X(last.x)}" cy="${Y(last.y)}" r="6" fill="${c0}"/><circle class="breathe" cx="${X(last.x)}" cy="${Y(last.y)}" r="4" fill="${c0}" stroke="var(--bg)" stroke-width="1.5"/></g>`;
+  const body = area + lines;
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico" class="${anim ? "draw" : ""}"><defs><pattern id="d${gid}" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="var(--faint)"/></pattern><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c0}" stop-opacity=".2"/><stop offset="1" stop-color="${c0}" stop-opacity="0"/></linearGradient><clipPath id="c${gid}"><rect class="clip" x="0" y="0" width="${W}" height="${H}"/></clipPath></defs><rect width="${W}" height="${H}" fill="url(#d${gid})"/><g class="ghost">${body}</g><g clip-path="url(#c${gid})">${body}</g>${marks}<line class="hl" y1="${pt - 6}" y2="${H}" stroke="var(--muted)" stroke-dasharray="3 3"/><g class="hds">${series.map((s) => `<circle r="4.5" fill="${s.color || "var(--accent)"}" stroke="var(--bg)" stroke-width="2"/>`).join("")}</g></svg><div class="tip"></div>`;
+  const svg = box.querySelector("svg"), tip = box.querySelector(".tip"), hl = svg.querySelector(".hl"), dots = [...svg.querySelectorAll(".hds circle")], clip = svg.querySelector(".clip");
   const place = (p, label) => {
     const f = X(p.x) / W;
     tip.style.left = f * 100 + "%";
     tip.style.transform = f > 0.82 ? "translateX(-100%)" : f < 0.18 ? "translateX(0)" : "translateX(-50%)";
     tip.innerHTML = label;
   };
-  const rest = () => { hl.setAttribute("visibility", "hidden"); hds.innerHTML = ""; if (series.length === 1) place(pk, `${esc(fmt(pk.y))}<span>${when(pk)}</span>`); else tip.innerHTML = ""; };
-  svg.addEventListener("pointermove", (e) => {
-    const r = svg.getBoundingClientRect(), x = x0 + ((((e.clientX - r.left) / r.width) * W - 2) / (W - pr - 2)) * (x1 - x0);
+  const rest = () => {
+    svg.classList.remove("hover"); clip.setAttribute("width", W);
+    if (one) place(pk, `${esc(fmt(pk.y))}<span>${when(pk)}</span>`); else tip.innerHTML = "";
+    onHover?.(null);
+  };
+  const tol = (x1 - x0) / 40 + 11 * MIN;
+  const move = (clientX) => {
+    const r = svg.getBoundingClientRect(), x = x0 + ((((clientX - r.left) / r.width) * W - 2) / (W - pr - 2)) * (x1 - x0);
     let best = null;
     for (const p of main) if (!best || Math.abs(p.x - x) < Math.abs(best.x - x)) best = p;
     if (!best) return;
-    hl.setAttribute("x1", X(best.x)); hl.setAttribute("x2", X(best.x)); hl.setAttribute("visibility", "visible");
-    const tol = (x1 - x0) / 40 + 11 * MIN;
-    const vals = series.map((s) => { let b = null; for (const p of s.pts) if (p.y != null && (!b || Math.abs(p.x - best.x) < Math.abs(b.x - best.x))) b = p; return b && Math.abs(b.x - best.x) < tol ? { s, p: b } : null; }).filter(Boolean);
-    hds.innerHTML = vals.map(({ s, p }) => `<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="4" fill="${s.color || "var(--accent)"}" stroke="var(--bg)" stroke-width="1.5"/>`).join("");
-    place(best, series.length === 1 ? `${esc(fmt(best.y))}<span>${when(best)}</span>` : `${when(best)} ${vals.map(({ s, p }) => `<span style="color:${s.color}">● ${esc(fmt(p.y))}</span>`).join("")}`);
-  });
+    const bx = X(best.x);
+    svg.classList.add("hover");
+    hl.setAttribute("x1", bx); hl.setAttribute("x2", bx);
+    clip.setAttribute("width", Math.max(0, bx));
+    const vals = series.map((s) => { let b = null; for (const p of s.pts) if (p.y != null && (!b || Math.abs(p.x - best.x) < Math.abs(b.x - best.x))) b = p; return b && Math.abs(b.x - best.x) < tol ? b : null; });
+    dots.forEach((c, i) => { const p = vals[i]; c.style.opacity = p ? 1 : 0; if (p) { c.setAttribute("cx", X(p.x)); c.setAttribute("cy", Y(p.y)); } });
+    if (one && onHover) { tip.innerHTML = ""; onHover({ ...best, label: when(best), isLast: best === last }); }
+    else place(best, one ? `${esc(fmt(best.y))}<span>${when(best)}</span>` : `${when(best)} ${series.map((s, i) => (vals[i] ? `<span style="color:${s.color}">● ${esc(fmt(vals[i].y))}</span>` : "")).join("")}`);
+  };
+  svg.addEventListener("pointermove", (e) => move(e.clientX));
+  svg.addEventListener("pointerdown", (e) => move(e.clientX));
   svg.addEventListener("pointerleave", rest);
+  svg.addEventListener("pointercancel", rest);
   rest();
 }
 function dropdown(host, options, cur, onPick) {
@@ -281,6 +330,12 @@ function railHTML(extra = "") {
 function frame(tab, colHTML, { rail = true, wide = false } = {}) {
   $view.innerHTML = `<div class="page fade${wide ? " wide" : ""}">${tab != null ? tabsBar(tab) : ""}<div class="col">${colHTML}</div>${rail ? railHTML() : ""}</div>`;
 }
+// depois de cada página: números rolam, indicadores deslizam, linhas entram em sequência
+function afterRender() {
+  const t = $view.querySelector(".tabs"); if (t) slide(t, "a.on", "tabs");
+  $view.querySelectorAll(".subtabs").forEach((x) => slide(x, ".subtab.on", "subtabs:" + location.hash.split("/")[1]));
+  startFlows();
+}
 
 /* =========================================================== Visão geral */
 const METRICS = [["total", "Jogadores"], ["wpeak", "Pico semanal"], ["growth", "Crescimento"], ["top10", "Participação do top 10"], ["newg", "Participação de jogos novos"], ["over1k", "Jogos acima de 1K"]];
@@ -331,6 +386,7 @@ function pageHome() {
   const lf = likeForLike("d1"), lh = likeForLike("d1h");
   const ref = lf && lf.now > S.data.total * 0.7 ? { v: lf.v, now: lf.now, l: "nas últimas 24h" } : lh ? { v: lh.v, now: lh.now, l: "na última hora" } : null;
   const delta = ref ? ref.now - ref.v : null;
+  const restSub = `${delta != null ? `${deltaChip(delta, ref.v)}<span class="muted">${ref.l} ·</span>` : ""}<span class="muted">jogando nos ${nfInt.format(G.length)} maiores jogos</span>`;
   let bo = breakingOut(), boLabel = "";
   if (bo.length < 5) { bo = breakingOutFallback(); boLabel = "última hora"; }
   const highs = newHighs().sort((a, b) => b.playing - a.playing);
@@ -339,8 +395,8 @@ function pageHome() {
   const trends = S.words.slice().sort((a, b) => b.newCount - a.newCount || b.playing - a.playing).slice(0, 5);
   frame("", `
     <section class="hero" id="hero">
-      <div class="hero-num">${nfInt.format(S.data.total)}</div>
-      <div class="hero-sub">${delta != null ? `<span class="chg ${delta >= 0 ? "up" : "down"}"><span class="tri">${delta >= 0 ? "▲" : "▼"}</span>${words(Math.abs(delta))} (${pctTxt(delta / ref.v)})</span><span class="muted">${ref.l} ·</span>` : ""}<span class="muted">jogando nos ${nfInt.format(G.length)} maiores jogos</span></div>
+      <div class="hero-top"><span class="live-dot" title="Ao vivo"></span>${flowHTML("home", S.data.total)}</div>
+      <div class="hero-sub" id="hs">${restSub}</div>
       <div class="chart" id="hc"></div>
       <div class="chart-bar"><div class="seg" id="hr"></div><div class="dd" id="hm"></div></div>
       <p class="note" id="hn" hidden></p>
@@ -358,13 +414,28 @@ function pageHome() {
   let range = store.get("sd-home-range", "1d"), metric = "total";
   const draw = () => {
     const { arr, note, fmt } = totalSeries(metric, range);
-    lineChart(document.getElementById("hc"), [{ pts: arr }], { fmt, gapMax: 8 });
+    lineChart(document.getElementById("hc"), [{ pts: arr }], { fmt, gapMax: 8, onHover: metric === "total" ? heroHover(document.querySelector("#hero number-flow"), document.getElementById("hs"), S.data.total, restSub) : null });
     const n = document.getElementById("hn"); n.hidden = !note; n.textContent = note;
     document.getElementById("hr").innerHTML = HOME_RANGES.map(([k, l]) => `<button type="button" data-r="${k}" class="${k === range ? "on" : ""}">${k === "live" ? '<span class="live"></span>' : ""}${l}</button>`).join("");
+    slide(document.getElementById("hr"));
     document.querySelectorAll("#hr button").forEach((b) => b.addEventListener("click", () => { range = b.dataset.r; store.set("sd-home-range", range); draw(); }));
     dropdown(document.getElementById("hm"), METRICS, metric, (k) => { metric = k; draw(); });
   };
   draw();
+}
+
+// seta + diferença + porcentagem (a mesma peça do número grande)
+const deltaChip = (d, base) => `<span class="chg ${d >= 0 ? "up" : "down"}"><span class="tri">${d >= 0 ? "▲" : "▼"}</span>${words(Math.abs(d))}${base ? ` (${pctTxt(d / base)})` : ""}</span>`;
+// ao passar o mouse no gráfico: o número grande mostra o valor do ponto e a linha de baixo a diferença para agora
+function heroHover(num, sub, current, restHTML) {
+  return (p) => {
+    if (!num || !sub) return;
+    if (!p) { delete num.dataset.hover; setFlow(num, current); sub.innerHTML = restHTML; sub.classList.remove("hov"); return; }
+    num.dataset.hover = "1"; setFlow(num, p.y);
+    const d = p.y - current;
+    sub.classList.add("hov");
+    sub.innerHTML = p.isLast ? `<span class="muted">agora · ${esc(p.label)}</span>` : `${deltaChip(d, current)}<span class="muted">${esc(p.label)}</span>`;
+  };
 }
 
 /* =========================================================== Jogos */
@@ -434,7 +505,7 @@ function pageStudio(name) {
   if (!s) return notFound("Estúdio não encontrado");
   const sp = studioSpark(s).map((y, k) => ({ x: S.data.slot - (47 - k) * 30 * MIN, y }));
   frame("estudios", `<div class="page-h"><a class="pill-btn icon" href="#/estudios" aria-label="Voltar">${I.back}</a>${icon(s.games[0], "ic lg")}<div><h1>${esc(s.key)}${s.verified ? ' <span class="verified">✓</span>' : ""}</h1><p>#${S.studios.indexOf(s) + 1} estúdio · ${s.type === "Group" ? "Grupo" : "Usuário"} · ${nfInt.format(s.games.length)} ${s.games.length === 1 ? "jogo" : "jogos"} no top</p></div></div>
-    <section class="hero"><div class="hero-num">${nfInt.format(s.playing)}</div><div class="hero-sub">${chg(s.d1)}<span class="muted">nas últimas 24h · ${K(s.visits)} visitas somadas</span></div><div class="chart" id="sc"></div><p class="note">Soma dos jogos do estúdio nas últimas 24 horas.</p></section>
+    <section class="hero"><div class="hero-top"><span class="live-dot"></span>${flowHTML("s" + s.key, s.playing)}</div><div class="hero-sub">${chg(s.d1)}<span class="muted">nas últimas 24h · ${K(s.visits)} visitas somadas</span></div><div class="chart" id="sc"></div><p class="note">Soma dos jogos do estúdio nas últimas 24 horas.</p></section>
     <div id="st" style="margin-top:8px"></div>`, { rail: false, wide: true });
   lineChart(document.getElementById("sc"), [{ pts: sp }], { h: 200 });
   tableWithMore(document.getElementById("st"), s.games);
@@ -545,15 +616,16 @@ function pageGame(id) {
   const bo = breakingOut().slice(0, 5);
   const listsHere = LISTS.filter(([s]) => g.lists?.[s]);
   const watchBtn = () => `${I.star(on())}<span>${on() ? "Acompanhando" : "Acompanhar"}</span>`;
+  const restSub = () => `${g.d1 != null ? `${chg(g.d1)}<span class="muted">nas últimas 24h ·</span>` : g.d1h != null ? `${chg(g.d1h)}<span class="muted">na última hora ·</span>` : ""}<span class="muted">coletado ${ago(S.data.t)}</span>`;
   $view.innerHTML = `<div class="page fade">
     <div class="g-sticky" id="gs"><a class="pill-btn icon" href="#/jogos" aria-label="Voltar">${I.back}</a>${icon(g)}<div style="min-width:0;flex:1"><b>${esc(g.name)}</b><small>${words(g.playing)} jogando</small></div><button class="pill-btn dark" type="button" data-watch>${watchBtn()}</button></div>
     <div class="col">
       <div class="g-head"><div>${icon(g, "ic lg")}<h1>${esc(g.name)}</h1><div class="by">Por <a href="${sl(g.creator)}">${esc(g.creator)}</a>${g.verified ? ' <span class="verified">✓</span>' : ""}${studio ? `<span class="chip">#${S.studios.indexOf(studio) + 1} estúdio</span>` : ""}</div>${g.blurb ? `<p class="blurb">${esc(g.blurb)}</p>` : ""}<a class="chip" href="${genl(g.genre)}">${esc(genre(g.genre))}</a></div>
         <div class="g-acts"><button class="pill-btn" type="button" id="gshare">${I.share}Compartilhar</button><button class="pill-btn dark" type="button" data-watch>${watchBtn()}</button><a class="pill-btn icon" href="https://www.roblox.com/games/${g.place}" target="_blank" rel="noopener" aria-label="Jogar no Roblox" title="Jogar no Roblox">${I.play}</a></div></div>
       <section class="hero" id="gh" style="margin-top:14px">
-        <div class="hero-num">${nfInt.format(g.playing)}</div>
-        <div class="hero-sub">${g.d1 != null ? `${chg(g.d1)}<span class="muted">nas últimas 24h ·</span>` : g.d1h != null ? `${chg(g.d1h)}<span class="muted">na última hora ·</span>` : ""}<span class="muted">coletado ${ago(S.data.t)}</span></div>
-        <div class="chart" id="gc"><div class="chart-empty" style="height:210px">Carregando histórico…</div></div>
+        <div class="hero-top"><span class="live-dot" title="Ao vivo"></span>${flowHTML("g" + g.id, g.playing)}</div>
+        <div class="hero-sub" id="gsub">${restSub()}</div>
+        <div class="chart" id="gc"><div class="chart-empty loading" style="height:210px"><span>Carregando histórico…</span></div></div>
         <div class="chart-bar"><div class="seg" id="gr"></div><div class="dd" id="gm"></div></div>
       </section>
       <div class="strip">
@@ -576,14 +648,15 @@ function pageGame(id) {
   window.__sdScroll = () => sticky.classList.toggle("show", window.scrollY > 260);
   window.addEventListener("scroll", window.__sdScroll, { passive: true });
   const syncWatch = () => $view.querySelectorAll("[data-watch]").forEach((b) => { b.classList.toggle("on", on()); b.innerHTML = watchBtn(); });
-  $view.querySelectorAll("[data-watch]").forEach((b) => b.addEventListener("click", () => { on() ? S.watch.delete(g.id) : S.watch.add(g.id); store.set("sd-watch", [...S.watch]); syncWatch(); toast(on() ? "Adicionado à watchlist" : "Removido da watchlist"); }));
+  $view.querySelectorAll("[data-watch]").forEach((b) => b.addEventListener("click", () => { on() ? S.watch.delete(g.id) : S.watch.add(g.id); store.set("sd-watch", [...S.watch]); syncWatch(); if (on()) $view.querySelectorAll("[data-watch] svg").forEach((x) => x.classList.add("pop")); toast(on() ? "Adicionado à watchlist" : "Removido da watchlist"); }));
   document.getElementById("gshare").addEventListener("click", async () => { try { await navigator.clipboard.writeText(location.href); toast("Link copiado"); } catch { toast(location.href); } });
 
   let fine = null, gf = null, range = store.get("sd-game-range", "1d"), metric = "ccu";
   const draw = () => {
     const arr = gameSeries(fine, gf, range, metric);
-    lineChart(document.getElementById("gc"), [{ pts: arr, color: "#e2621b" }], { h: 230, fmt: metric === "hours" ? (v) => words(v) + " h" : K, gapMax: 4 });
+    lineChart(document.getElementById("gc"), [{ pts: arr, color: "#e2621b" }], { h: 230, fmt: metric === "hours" ? (v) => words(v) + " h" : K, gapMax: 4, onHover: metric === "ccu" ? heroHover(document.querySelector("#gh number-flow"), document.getElementById("gsub"), g.playing, restSub()) : null });
     document.getElementById("gr").innerHTML = metric === "ccu" ? GAME_RANGES.map(([k, l]) => `<button type="button" data-r="${k}" class="${k === range ? "on" : ""}">${k === "live" ? '<span class="live"></span>' : ""}${l}</button>`).join("") : '<button type="button" class="on">Por dia</button>';
+    slide(document.getElementById("gr"));
     document.querySelectorAll("#gr [data-r]").forEach((b) => b.addEventListener("click", () => { range = b.dataset.r; store.set("sd-game-range", range); draw(); }));
     dropdown(document.getElementById("gm"), [["ccu", "Jogadores"], ["peak", "Pico diário"], ["hours", "Horas jogadas por dia"]], metric, (k) => { metric = k; draw(); });
   };
@@ -635,11 +708,12 @@ function pageGame(id) {
   const show = (k) => {
     cur = k; document.getElementById("gp").innerHTML = tabs[k]();
     $view.querySelectorAll("[data-pt]").forEach((b) => b.classList.toggle("on", b.dataset.pt === k));
+    slide($view.querySelector(".ptabs"), "button.on", "ptabs");
     $view.querySelector("[data-hist]")?.addEventListener("click", () => { range = "all"; metric = "ccu"; draw(); document.getElementById("gh").scrollIntoView({ behavior: "smooth" }); });
     const brows = document.getElementById("brows");
     if (brows) {
       const bs = gf.badges;
-      const drawB = (mode) => { brows.innerHTML = bs.slice(0, 10).map((b, i) => `<div class="r">${b.icon ? `<img class="ic" src="${esc(b.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" style="border-radius:50%">` : '<span class="ic"></span>'}<span class="t"><span class="nm" style="color:inherit">${esc(b.name)}</span><span class="sb">${i > 0 && bs[i - 1].awarded ? `${Math.round((b.awarded / bs[i - 1].awarded) * 100)}% de conversão` : b.winRate != null ? `${nf(b.winRate, 1)}% de quem joga ganha` : ""}</span></span><span class="v">${words(mode === "day" ? b.pastDay : b.awarded)}<small>concedidas</small></span></div>`).join(""); document.querySelectorAll("#bseg button").forEach((x) => x.classList.toggle("on", x.dataset.b === mode)); };
+      const drawB = (mode) => { brows.innerHTML = bs.slice(0, 10).map((b, i) => `<div class="r">${b.icon ? `<img class="ic" src="${esc(b.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" style="border-radius:50%">` : '<span class="ic"></span>'}<span class="t"><span class="nm" style="color:inherit">${esc(b.name)}</span><span class="sb">${i > 0 && bs[i - 1].awarded ? `${Math.round((b.awarded / bs[i - 1].awarded) * 100)}% de conversão` : b.winRate != null ? `${nf(b.winRate, 1)}% de quem joga ganha` : ""}</span></span><span class="v">${words(mode === "day" ? b.pastDay : b.awarded)}<small>concedidas</small></span></div>`).join(""); document.querySelectorAll("#bseg button").forEach((x) => x.classList.toggle("on", x.dataset.b === mode)); slide(document.getElementById("bseg")); };
       drawB("day");
       document.querySelectorAll("#bseg button").forEach((x) => x.addEventListener("click", () => drawB(x.dataset.b)));
     }
@@ -684,6 +758,7 @@ function pageCompare(idsStr = "") {
     document.getElementById("cp").innerHTML = ids.map((id, i) => `<span class="chip"><i style="background:${CMP_COLORS[i]}"></i>${esc(S.byId.get(id).name)}<button type="button" data-x="${id}" aria-label="Remover">✕</button></span>`).join("");
     document.querySelectorAll("#cp [data-x]").forEach((b) => b.addEventListener("click", () => { ids = ids.filter((x) => x !== Number(b.dataset.x)); draw(); }));
     document.getElementById("cg").innerHTML = [["1d", "24h"], ["1w", "7 dias"], ["all", "Tudo"]].map(([k, l]) => `<button type="button" data-r="${k}" class="${k === range ? "on" : ""}">${l}</button>`).join("");
+    slide(document.getElementById("cg"));
     document.querySelectorAll("#cg button").forEach((b) => b.addEventListener("click", () => { range = b.dataset.r; draw(); }));
     const data = await Promise.all(ids.map(async (id) => [await loadShard(id), await loadG(id)]));
     lineChart(document.getElementById("cc"), ids.map((id, i) => ({ pts: gameSeries(data[i][0], data[i][1], range, "ccu"), color: CMP_COLORS[i] })), { h: 280, empty: "Escolha pelo menos um jogo." });
@@ -752,6 +827,7 @@ function route() {
   document.querySelectorAll("[data-nav]").forEach((l) => l.classList.toggle("on", l.dataset.nav === nav));
   const pages = { "": pageHome, jogos: () => pageGames(b), estudios: () => pageStudios(b), estudio: () => pageStudio(tail), genero: () => pageGenre(tail), tendencias: () => pageTrends(tail), rankings: () => pageRankings(b), watchlist: pageWatch, screener: pageScreener, jogo: () => pageGame(b), atividade: pageActivity, comparar: () => pageCompare(b), sobre: pageAbout };
   (pages[a] || pageHome)();
+  afterRender();
   if (a !== "jogo") document.title = "Saint Data · Jogadores ao vivo de todos os jogos do Roblox";
 }
 
@@ -772,7 +848,8 @@ async function load(first = true) {
     document.getElementById("side-stamp").textContent = `Atualizado ${ago(data.t)}`;
     const quiet = /^#\/(jogo|screener|comparar)/.test(location.hash) || document.activeElement?.matches?.("input,select");
     if (first) { route(); window.scrollTo(0, 0); }
-    else if (changed && !quiet) { const y = window.scrollY; route(); window.scrollTo(0, y); }
+    else if (changed && !quiet) { const y = window.scrollY; route(); $view.querySelector(".page")?.classList.remove("fade"); $view.querySelectorAll("svg.draw").forEach((x) => x.classList.remove("draw")); window.scrollTo(0, y); }
+    else if (changed && location.hash.startsWith("#/jogo/")) { const g = S.byId.get(Number(location.hash.split("/")[2])), el = $view.querySelector("#gh number-flow"); if (g && el && !el.dataset.hover) setFlow(el, g.playing); }
   } catch (e) {
     if (first) $view.innerHTML = `<div class="page wide"><div class="col soon"><h1>Não foi possível carregar os dados</h1><p>Recarregue a página em alguns instantes. (${esc(e.message)})</p></div></div>`;
   }
